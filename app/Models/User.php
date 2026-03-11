@@ -64,6 +64,16 @@ class User extends Authenticatable
         return $this->hasMany(UserCard::class);
     }
 
+    public function matchPredictions(): HasMany
+    {
+        return $this->hasMany(MatchPrediction::class);
+    }
+
+    public function predictionWeeklyBonuses(): HasMany
+    {
+        return $this->hasMany(PredictionWeeklyBonus::class);
+    }
+
     // ========== ROLES ==========
 
     public function hasRole(string $slug): bool

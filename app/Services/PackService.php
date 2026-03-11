@@ -68,12 +68,20 @@ class PackService
         $cards = collect();
 
         $rarities = $rarityBoosts ?? [
-            'common' => 70,
-            'uncommon' => 20,
-            'rare' => 7,
-            'epic' => 2.5,
-            'legendary' => 0.5,
+            'common' => 55.0,
+            'uncommon' => 25.0,
+            'rare' => 12.0,
+            'epic' => 6.0,
+            'legendary' => 1.5,
+            'icone' => 0.5,
         ];
+
+        if (!array_key_exists('icone', $rarities)) {
+            $rarities['icone'] = 0.2;
+            if (isset($rarities['common']) && $rarities['common'] >= 0.2) {
+                $rarities['common'] = $rarities['common'] - 0.2;
+            }
+        }
 
         for ($i = 0; $i < $packSize; $i++) {
             $raritySlug = $this->pickRandomRarity($rarities);

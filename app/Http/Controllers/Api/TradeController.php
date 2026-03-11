@@ -172,7 +172,7 @@ class TradeController extends Controller
 
     private function getFilterConfig(): array
     {
-        $rarities = \App\Models\Rarity::orderByRaw("CASE slug WHEN 'common' THEN 1 WHEN 'uncommon' THEN 2 WHEN 'rare' THEN 3 WHEN 'epic' THEN 4 WHEN 'legendary' THEN 5 ELSE 99 END")->get();
+        $rarities = \App\Models\Rarity::orderByRaw("CASE slug WHEN 'common' THEN 1 WHEN 'uncommon' THEN 2 WHEN 'rare' THEN 3 WHEN 'epic' THEN 4 WHEN 'legendary' THEN 5 WHEN 'icone' THEN 6 ELSE 99 END")->get();
         
         return [
             'rarities' => $rarities->map(fn($r) => ['label' => $r->name, 'value' => $r->slug]),

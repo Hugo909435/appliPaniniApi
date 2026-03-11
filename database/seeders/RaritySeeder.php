@@ -38,12 +38,18 @@ class RaritySeeder extends Seeder
                 'name' => 'Legendary',
                 'slug' => 'legendary',
                 'color' => '#F59E0B',
-                'drop_rate' => 1.0,
+                'drop_rate' => 0.8,
+            ],
+            [
+                'name' => 'Icône du club',
+                'slug' => 'icone',
+                'color' => '#EC4899',
+                'drop_rate' => 0.2,
             ],
         ];
 
         DB::table('rarities')->insert($rarities);
 
-        $this->command->info('5 raretés créées avec succès !');
+        $this->command->info('6 raretés créées avec succès !');
     }
 }

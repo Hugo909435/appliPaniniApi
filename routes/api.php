@@ -9,10 +9,14 @@ use App\Http\Controllers\Api\ChallengeController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\MoneyController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\PredictionController;
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\CardController;
 use App\Http\Controllers\Api\Admin\ChallengeAdminController;
+use App\Http\Controllers\Api\Admin\PackController as AdminPackController;
+use App\Http\Controllers\Api\Admin\ClubTeamController;
+use App\Http\Controllers\Api\Admin\ClubMatchController;
 
 /*
 |--------------------------------------------------------------------------
@@ -76,6 +80,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/money/create-intent', [MoneyController::class, 'createPaymentIntent']);
     Route::post('/money/process', [MoneyController::class, 'processPayment']);
     Route::get('/money/history', [MoneyController::class, 'history']);
+
+    // Predictions
+    Route::get('/matches/week', [PredictionController::class, 'week']);
+    Route::post('/predictions', [PredictionController::class, 'store']);
+    Route::get('/predictions/history', [PredictionController::class, 'history']);
+    Route::get('/predictions/leaderboard', [PredictionController::class, 'leaderboard']);
 });
 
 /*
@@ -100,6 +110,24 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::get('/cards/{card}', [CardController::class, 'show']);
     Route::post('/cards/{card}', [CardController::class, 'update']);
     Route::delete('/cards/{card}', [CardController::class, 'destroy']);
+
+    // Packs
+    Route::get('/packs', [AdminPackController::class, 'index']);
+    Route::post('/packs', [AdminPackController::class, 'store']);
+    Route::post('/packs/{pack}', [AdminPackController::class, 'update']);
+    Route::delete('/packs/{pack}', [AdminPackController::class, 'destroy']);
+
+    // Club Teams
+    Route::get('/club-teams', [ClubTeamController::class, 'index']);
+    Route::post('/club-teams', [ClubTeamController::class, 'store']);
+    Route::post('/club-teams/{clubTeam}', [ClubTeamController::class, 'update']);
+    Route::delete('/club-teams/{clubTeam}', [ClubTeamController::class, 'destroy']);
+
+    // Club Matches
+    Route::get('/club-matches', [ClubMatchController::class, 'index']);
+    Route::post('/club-matches', [ClubMatchController::class, 'store']);
+    Route::post('/club-matches/{clubMatch}', [ClubMatchController::class, 'update']);
+    Route::delete('/club-matches/{clubMatch}', [ClubMatchController::class, 'destroy']);
 
 
     // Challenges

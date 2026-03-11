@@ -44,7 +44,7 @@ class PackController extends Controller
     public function opening(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'pack_id' => 'required|exists:packs,id',
+            'pack_id' => 'nullable|integer',
             'free' => 'boolean',
             'use_money' => 'boolean',
         ]);
@@ -53,16 +53,23 @@ class PackController extends Controller
         $isFree = $request->boolean('free');
         $useMoney = $request->boolean('use_money');
 
-        $pack = Pack::findOrFail($validated['pack_id']);
+        $packId = $validated['pack_id'] ?? null;
+        $pack = $packId
+            ? Pack::find($packId)
+            : Pack::where('is_active', true)->orderBy('price', 'asc')->first();
+
+        if (!$pack) {
+            return response()->json(['message' => 'Aucun pack disponible.'], 404);
+        }
 
         if ($isFree && !$user->hasFreePacks()) {
-            return response()->json(['message' => 'Vous n'avez pas de pack gratuit disponible.'], 400);
+            return response()->json(['message' => "Vous n'avez pas de pack gratuit disponible."], 400);
         }
         if (!$isFree && $useMoney && $user->money < $pack->money_price) {
-            return response()->json(['message' => 'Pas assez de money.'], 400);
+            return response()->json(['message' => "Pas assez de money."], 400);
         }
         if (!$isFree && !$useMoney && $user->coins < $pack->price) {
-            return response()->json(['message' => 'Pas assez de pi?ces.'], 400);
+            return response()->json(['message' => "Pas assez de pièces."], 400);
         }
 
         try {
@@ -100,7 +107,7 @@ class PackController extends Controller
                     'card_count' => $pack->card_count,
                 ],
                 'cards' => $formattedCards,
-                'has_prestige_card' => $formattedCards->contains(fn($c) => in_array($c['rarity'], ['epic', 'legendary'])),
+                'has_prestige_card' => $formattedCards->contains(fn($c) => in_array($c['rarity'], ['epic', 'legendary', 'icone'])),
                 'user' => [
                     'coins' => $user->coins,
                     'money' => $user->money,
@@ -119,7 +126,7 @@ class PackController extends Controller
         if (!$user->claimFreePack()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Vous ne pouvez pas encore r?cup?rer de pack gratuit.',
+                'message' => "Vous ne pouvez pas encore récupérer de pack gratuit.",
             ], 400);
         }
 
