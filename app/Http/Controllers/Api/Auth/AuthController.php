@@ -133,6 +133,7 @@ class AuthController extends Controller
             'xp_for_next_level' => $xpForNextLevel,
             'free_packs' => $user->free_packs,
             'can_claim_free_pack' => $user->canClaimFreePack(),
+            'is_admin' => $user->hasRole('admin'),
             'created_at' => $user->created_at?->toDateTimeString(),
         ];
     }

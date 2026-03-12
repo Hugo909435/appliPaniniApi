@@ -14,12 +14,13 @@ class CollectionController extends Controller
         $user = $request->user();
 
         $ownedCards = $user->cards()
-            ->with(['position', 'rarity'])
+            ->with(['position', 'rarity', 'clubTeam'])
             ->get()
             ->map(fn($card) => [
                 'id' => $card->id,
                 'name' => $card->name,
                 'position' => $card->position?->name,
+                'team' => $card->clubTeam?->name,
                 'rarity' => strtolower($card->rarity?->slug ?? 'common'),
                 'rarity_label' => $card->rarity?->name,
                 'rarity_color' => $card->rarity?->color,
@@ -33,12 +34,13 @@ class CollectionController extends Controller
                 'quantity' => $card->pivot->quantity,
             ]);
 
-        $allCards = Card::with(['position', 'rarity'])
+        $allCards = Card::with(['position', 'rarity', 'clubTeam'])
             ->get()
             ->map(fn($card) => [
                 'id' => $card->id,
                 'name' => $card->name,
                 'position' => $card->position?->name,
+                'team' => $card->clubTeam?->name,
                 'rarity' => strtolower($card->rarity?->slug ?? 'common'),
                 'rarity_label' => $card->rarity?->name,
                 'rarity_color' => $card->rarity?->color,
@@ -62,7 +64,7 @@ class CollectionController extends Controller
     {
         $user = $request->user();
         $userCard = $user->cards()->where('card_id', $card->id)->first();
-        $card->load(['position', 'rarity']);
+        $card->load(['position', 'rarity', 'clubTeam']);
 
         $availableForTrade = Card::whereNotIn('id', $user->cards()->pluck('cards.id'))
             ->with(['position', 'rarity'])
@@ -71,6 +73,7 @@ class CollectionController extends Controller
                 'id' => $c->id,
                 'name' => $c->name,
                 'position' => $c->position?->name,
+                'team' => $c->clubTeam?->name,
                 'rarity' => strtolower($c->rarity?->slug ?? 'common'),
                 'image' => $c->image_url,
             ]);
@@ -80,6 +83,7 @@ class CollectionController extends Controller
                 'id' => $card->id,
                 'name' => $card->name,
                 'position' => $card->position?->name,
+                'team' => $card->clubTeam?->name,
                 'rarity' => strtolower($card->rarity?->slug ?? 'common'),
                 'rarity_label' => $card->rarity?->name,
                 'rarity_color' => $card->rarity?->color,

@@ -13,45 +13,92 @@ use Illuminate\Support\Facades\DB;
 
 class PredictionController extends Controller
 {
+    public function weeks(Request $request): JsonResponse
+    {
+        $weeks = \App\Models\MatchWeek::withCount('matches')
+            ->orderByDesc('number')
+            ->get()
+            ->map(fn($w) => [
+                'id'          => $w->id,
+                'number'      => $w->number,
+                'start_date'  => $w->start_date->format('Y-m-d'),
+                'end_date'    => $w->end_date->format('Y-m-d'),
+                'label'       => $w->label,
+                'match_count' => $w->matches_count,
+            ]);
+
+        // Also add current week info
+        $now = now();
+        $current = \App\Models\MatchWeek::where('start_date', '<=', $now)
+            ->where('end_date', '>=', $now)
+            ->first();
+
+        return response()->json([
+            'weeks' => $weeks,
+            'current_week_id' => $current?->id,
+        ]);
+    }
+
     public function week(Request $request): JsonResponse
     {
         $user = $request->user();
-        $weekStart = $request->filled('week_start')
-            ? Carbon::parse($request->week_start)->startOfWeek(Carbon::MONDAY)->startOfDay()
-            : now()->startOfWeek(Carbon::MONDAY)->startOfDay();
 
-        $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+        // Resolve the week
+        if ($request->filled('week_id')) {
+            $matchWeek = \App\Models\MatchWeek::find($request->week_id);
+        } else {
+            // Current week or latest week
+            $now = now();
+            $matchWeek = \App\Models\MatchWeek::where('start_date', '<=', $now)
+                ->where('end_date', '>=', $now)
+                ->first()
+                ?? \App\Models\MatchWeek::orderByDesc('number')->first();
+        }
+
+        if (!$matchWeek) {
+            return response()->json([
+                'week_id'      => null,
+                'week_number'  => null,
+                'week_start'   => null,
+                'week_end'     => null,
+                'week_label'   => null,
+                'bonus_awarded'=> false,
+                'matches'      => [],
+            ]);
+        }
+
+        $weekStart = $matchWeek->start_date->startOfDay();
+        $weekEnd   = $matchWeek->end_date->endOfDay();
 
         $matches = ClubMatch::with([
             'clubTeam',
             'predictions' => fn($q) => $q->where('user_id', $user->id),
         ])
-            ->whereBetween('kickoff_at', [$weekStart, $weekEnd])
+            ->where('match_week_id', $matchWeek->id)
             ->orderBy('kickoff_at')
             ->get()
             ->map(function (ClubMatch $match) use ($user) {
-                $clubName = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
-                $homeName = $match->is_home ? $clubName : $match->opponent_name;
-                $awayName = $match->is_home ? $match->opponent_name : $clubName;
+                $clubName   = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
+                $homeName   = $match->is_home ? $clubName : $match->opponent_name;
+                $awayName   = $match->is_home ? $match->opponent_name : $clubName;
                 $prediction = $match->predictions->first();
 
                 return [
-                    'id' => $match->id,
-                    'club_team' => $match->clubTeam ? [
-                        'id' => $match->clubTeam->id,
-                        'name' => $match->clubTeam->name,
+                    'id'              => $match->id,
+                    'club_team'       => $match->clubTeam ? [
+                        'id' => $match->clubTeam->id, 'name' => $match->clubTeam->name,
                         'short_name' => $match->clubTeam->short_name,
                     ] : null,
-                    'opponent_name' => $match->opponent_name,
-                    'location' => $match->location,
-                    'kickoff_at' => $match->kickoff_at?->toDateTimeString(),
-                    'is_home' => $match->is_home,
-                    'home_name' => $homeName,
-                    'away_name' => $awayName,
-                    'home_score' => $match->home_score,
-                    'away_score' => $match->away_score,
-                    'result_outcome' => $match->result_outcome,
-                    'can_predict' => $match->kickoff_at?->isFuture() ?? false,
+                    'opponent_name'   => $match->opponent_name,
+                    'location'        => $match->location,
+                    'kickoff_at'      => $match->kickoff_at?->toDateTimeString(),
+                    'is_home'         => $match->is_home,
+                    'home_name'       => $homeName,
+                    'away_name'       => $awayName,
+                    'home_score'      => $match->home_score,
+                    'away_score'      => $match->away_score,
+                    'result_outcome'  => $match->result_outcome,
+                    'can_predict'     => $match->kickoff_at?->isFuture() ?? false,
                     'user_prediction' => $prediction?->predicted_outcome,
                 ];
             });
@@ -61,10 +108,13 @@ class PredictionController extends Controller
             ->exists();
 
         return response()->json([
-            'week_start' => $weekStart->toDateString(),
-            'week_end' => $weekEnd->toDateString(),
-            'bonus_awarded' => $bonusAwarded,
-            'matches' => $matches,
+            'week_id'      => $matchWeek->id,
+            'week_number'  => $matchWeek->number,
+            'week_start'   => $weekStart->toDateString(),
+            'week_end'     => $weekEnd->toDateString(),
+            'week_label'   => $matchWeek->label,
+            'bonus_awarded'=> $bonusAwarded,
+            'matches'      => $matches,
         ]);
     }
 

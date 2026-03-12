@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Card;
+use App\Models\ClubTeam;
 use App\Models\Position;
 use App\Models\Rarity;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +16,7 @@ class CardController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Card::with(['position', 'rarity']);
+        $query = Card::with(['position', 'rarity', 'clubTeam']);
         if ($request->filled('search')) $query->where('name', 'like', '%' . $request->search . '%');
         if ($request->filled('rarity')) {
             $rarity = Rarity::where('slug', $request->rarity)->first();
@@ -39,12 +40,14 @@ class CardController extends Controller
             'number' => $card->number,
             'positions_id' => $card->positions_id,
             'rarities_id' => $card->rarities_id,
+            'club_team_id' => $card->club_team_id,
         ]);
 
         return response()->json([
             'cards' => $cards,
             'positions' => Position::orderBy('name')->get(['id', 'name']),
             'rarities' => Rarity::orderBy('drop_rate', 'desc')->get(['id', 'name', 'slug', 'color']),
+            'club_teams' => ClubTeam::orderBy('name')->get(['id', 'name', 'short_name', 'is_active']),
         ]);
     }
 
@@ -57,6 +60,7 @@ class CardController extends Controller
                 'name' => $card->name,
                 'positions_id' => $card->positions_id,
                 'rarities_id' => $card->rarities_id,
+                'club_team_id' => $card->club_team_id,
                 'attack' => $card->attack,
                 'defense' => $card->defense,
                 'speed' => $card->speed,
@@ -74,6 +78,7 @@ class CardController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'club_team_id' => 'nullable|exists:club_teams,id',
             'positions_id' => 'required|exists:positions,id',
             'rarities_id' => 'required|exists:rarities,id',
             'attack' => 'required|integer|min:0|max:99',
@@ -101,6 +106,7 @@ class CardController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'club_team_id' => 'nullable|exists:club_teams,id',
             'positions_id' => 'required|exists:positions,id',
             'rarities_id' => 'required|exists:rarities,id',
             'attack' => 'required|integer|min:0|max:99',

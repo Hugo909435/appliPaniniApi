@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Admin\ChallengeAdminController;
 use App\Http\Controllers\Api\Admin\PackController as AdminPackController;
 use App\Http\Controllers\Api\Admin\ClubTeamController;
 use App\Http\Controllers\Api\Admin\ClubMatchController;
+use App\Http\Controllers\Api\Admin\MatchWeekAdminController;
 
 /*
 |--------------------------------------------------------------------------
@@ -82,6 +83,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/money/history', [MoneyController::class, 'history']);
 
     // Predictions
+    Route::get('/matches/weeks', [PredictionController::class, 'weeks']);
     Route::get('/matches/week', [PredictionController::class, 'week']);
     Route::post('/predictions', [PredictionController::class, 'store']);
     Route::get('/predictions/history', [PredictionController::class, 'history']);
@@ -128,6 +130,12 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/club-matches', [ClubMatchController::class, 'store']);
     Route::post('/club-matches/{clubMatch}', [ClubMatchController::class, 'update']);
     Route::delete('/club-matches/{clubMatch}', [ClubMatchController::class, 'destroy']);
+
+    // Match Weeks
+    Route::get('/match-weeks', [MatchWeekAdminController::class, 'index']);
+    Route::post('/match-weeks', [MatchWeekAdminController::class, 'store']);
+    Route::post('/match-weeks/{matchWeek}', [MatchWeekAdminController::class, 'update']);
+    Route::delete('/match-weeks/{matchWeek}', [MatchWeekAdminController::class, 'destroy']);
 
 
     // Challenges

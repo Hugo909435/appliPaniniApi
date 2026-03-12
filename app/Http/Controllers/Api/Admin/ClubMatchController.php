@@ -20,7 +20,9 @@ class ClubMatchController extends Controller
             $query->where('club_team_id', $request->team_id);
         }
 
-        if ($request->filled('week_start')) {
+        if ($request->filled('week_id')) {
+            $query->where('match_week_id', $request->week_id);
+        } elseif ($request->filled('week_start')) {
             $start = Carbon::parse($request->week_start)->startOfWeek(Carbon::MONDAY)->startOfDay();
             $end = $start->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
             $query->whereBetween('kickoff_at', [$start, $end]);
@@ -46,14 +48,17 @@ class ClubMatchController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'match_week_id' => 'nullable|integer|exists:match_weeks,id',
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
-            'location' => 'required|string|max:150',
+            'location' => 'nullable|string|max:150',
             'kickoff_at' => 'required|date',
             'is_home' => 'required|boolean',
             'home_score' => 'nullable|integer|min:0|max:99',
             'away_score' => 'nullable|integer|min:0|max:99',
         ]);
+
+        $validated['location'] = $request->input('location') ?? '';
 
         $match = ClubMatch::create($validated);
         $this->applyResultIfAny($match);
@@ -64,14 +69,17 @@ class ClubMatchController extends Controller
     public function update(Request $request, ClubMatch $clubMatch): JsonResponse
     {
         $validated = $request->validate([
+            'match_week_id' => 'nullable|integer|exists:match_weeks,id',
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
-            'location' => 'required|string|max:150',
+            'location' => 'nullable|string|max:150',
             'kickoff_at' => 'required|date',
             'is_home' => 'required|boolean',
             'home_score' => 'nullable|integer|min:0|max:99',
             'away_score' => 'nullable|integer|min:0|max:99',
         ]);
+
+        $validated['location'] = $validated['location'] ?? '';
 
         $previousOutcome = $clubMatch->result_outcome;
         $clubMatch->update($validated);
@@ -114,6 +122,7 @@ class ClubMatchController extends Controller
 
         return [
             'id' => $match->id,
+            'match_week_id' => $match->match_week_id,
             'club_team_id' => $match->club_team_id,
             'club_team' => $match->clubTeam ? [
                 'id' => $match->clubTeam->id,

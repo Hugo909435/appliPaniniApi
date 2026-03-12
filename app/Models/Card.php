@@ -12,6 +12,7 @@ class Card extends Model
 
     protected $fillable = [
         'name',
+        'club_team_id',
         'positions_id',
         'rarities_id',
         'image',
@@ -46,6 +47,11 @@ class Card extends Model
     }
 
     // Relations (noms simples pour utiliser avec ->with())
+
+    public function clubTeam(): BelongsTo
+    {
+        return $this->belongsTo(ClubTeam::class);
+    }
 
     public function position(): BelongsTo
     {

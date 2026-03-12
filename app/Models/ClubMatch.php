@@ -12,6 +12,7 @@ class ClubMatch extends Model
     use HasFactory;
 
     protected $fillable = [
+        'match_week_id',
         'club_team_id',
         'opponent_name',
         'location',
@@ -32,6 +33,11 @@ class ClubMatch extends Model
             'away_score' => 'integer',
             'result_set_at' => 'datetime',
         ];
+    }
+
+    public function matchWeek(): BelongsTo
+    {
+        return $this->belongsTo(MatchWeek::class);
     }
 
     public function clubTeam(): BelongsTo
