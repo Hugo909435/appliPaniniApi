@@ -72,7 +72,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
-        $user->load('profile');
+        $user->load('profile.favoritePlayerCard.rarity');
 
         return response()->json([
             'user' => $this->formatUser($user),
@@ -135,6 +135,11 @@ class AuthController extends Controller
             'can_claim_free_pack' => $user->canClaimFreePack(),
             'is_admin' => $user->hasRole('admin'),
             'created_at' => $user->created_at?->toDateTimeString(),
+            'favorite_card' => $profile?->favoritePlayerCard ? [
+                'id'     => $profile->favoritePlayerCard->id,
+                'image'  => $profile->favoritePlayerCard->image_url,
+                'rarity' => $profile->favoritePlayerCard->rarity?->slug,
+            ] : null,
         ];
     }
 }

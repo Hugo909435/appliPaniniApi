@@ -43,11 +43,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Profile
     Route::get('/profile', [ProfileController::class, 'show']);
-    Route::get('/profile/{userId}', [ProfileController::class, 'showUser']);
     Route::patch('/profile', [ProfileController::class, 'update']);
     Route::delete('/profile', [ProfileController::class, 'destroy']);
     Route::get('/profile/customize', [ProfileController::class, 'customize']);
     Route::post('/profile/customize', [ProfileController::class, 'updateCustomization']);
+    Route::get('/profile/{userId}', [ProfileController::class, 'showUser']);
 
     // Collection
     Route::get('/collection', [CollectionController::class, 'index']);
