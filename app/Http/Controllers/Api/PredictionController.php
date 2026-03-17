@@ -13,6 +13,13 @@ use Illuminate\Support\Facades\DB;
 
 class PredictionController extends Controller
 {
+    // ─── Récompenses individuelles ──────────────────────────────────────────────
+    const COINS_EXACT   = 75;
+    const COINS_WINNER  = 30;
+    const XP_EXACT      = 50;
+    const XP_WINNER     = 20;
+
+    // ─── weeks ──────────────────────────────────────────────────────────────────
     public function weeks(Request $request): JsonResponse
     {
         $weeks = \App\Models\MatchWeek::withCount('matches')
@@ -27,27 +34,25 @@ class PredictionController extends Controller
                 'match_count' => $w->matches_count,
             ]);
 
-        // Also add current week info
-        $now = now();
+        $now     = now();
         $current = \App\Models\MatchWeek::where('start_date', '<=', $now)
             ->where('end_date', '>=', $now)
             ->first();
 
         return response()->json([
-            'weeks' => $weeks,
+            'weeks'           => $weeks,
             'current_week_id' => $current?->id,
         ]);
     }
 
+    // ─── week ────────────────────────────────────────────────────────────────────
     public function week(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        // Resolve the week
         if ($request->filled('week_id')) {
             $matchWeek = \App\Models\MatchWeek::find($request->week_id);
         } else {
-            // Current week or latest week
             $now = now();
             $matchWeek = \App\Models\MatchWeek::where('start_date', '<=', $now)
                 ->where('end_date', '>=', $now)
@@ -57,13 +62,13 @@ class PredictionController extends Controller
 
         if (!$matchWeek) {
             return response()->json([
-                'week_id'      => null,
-                'week_number'  => null,
-                'week_start'   => null,
-                'week_end'     => null,
-                'week_label'   => null,
-                'bonus_awarded'=> false,
-                'matches'      => [],
+                'week_id'       => null,
+                'week_number'   => null,
+                'week_start'    => null,
+                'week_end'      => null,
+                'week_label'    => null,
+                'bonus_awarded' => false,
+                'matches'       => [],
             ]);
         }
 
@@ -72,34 +77,55 @@ class PredictionController extends Controller
 
         $matches = ClubMatch::with([
             'clubTeam',
+            'matchWeek',
             'predictions' => fn($q) => $q->where('user_id', $user->id),
         ])
-            ->where('match_week_id', $matchWeek->id)
+            ->where(function ($q) use ($matchWeek, $weekStart, $weekEnd) {
+                $q->where('match_week_id', $matchWeek->id)
+                  ->orWhere(function ($q) use ($weekStart, $weekEnd) {
+                      $q->whereNull('match_week_id')
+                        ->whereBetween('kickoff_at', [$weekStart, $weekEnd]);
+                  });
+            })
             ->orderBy('kickoff_at')
             ->get()
             ->map(function (ClubMatch $match) use ($user) {
-                $clubName   = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
-                $homeName   = $match->is_home ? $clubName : $match->opponent_name;
-                $awayName   = $match->is_home ? $match->opponent_name : $clubName;
+                $now        = now();
+                $weekStart2 = $match->matchWeek?->start_date?->copy()->startOfDay();
+                if (!$weekStart2 && $match->kickoff_at) {
+                    $weekStart2 = $match->kickoff_at->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+                }
+                $predictClose  = $weekStart2?->copy()->addDays(4)->setTime(12, 0);
+                $withinWindow  = $weekStart2 && $predictClose
+                    ? ($now->greaterThanOrEqualTo($weekStart2) && $now->lessThanOrEqualTo($predictClose))
+                    : false;
+                $clubName  = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
+                $homeName  = $match->is_home ? $clubName : $match->opponent_name;
+                $awayName  = $match->is_home ? $match->opponent_name : $clubName;
                 $prediction = $match->predictions->first();
 
                 return [
-                    'id'              => $match->id,
-                    'club_team'       => $match->clubTeam ? [
-                        'id' => $match->clubTeam->id, 'name' => $match->clubTeam->name,
+                    'id'             => $match->id,
+                    'club_team'      => $match->clubTeam ? [
+                        'id'         => $match->clubTeam->id,
+                        'name'       => $match->clubTeam->name,
                         'short_name' => $match->clubTeam->short_name,
                     ] : null,
-                    'opponent_name'   => $match->opponent_name,
-                    'location'        => $match->location,
-                    'kickoff_at'      => $match->kickoff_at?->toDateTimeString(),
-                    'is_home'         => $match->is_home,
-                    'home_name'       => $homeName,
-                    'away_name'       => $awayName,
-                    'home_score'      => $match->home_score,
-                    'away_score'      => $match->away_score,
-                    'result_outcome'  => $match->result_outcome,
-                    'can_predict'     => $match->kickoff_at?->isFuture() ?? false,
-                    'user_prediction' => $prediction?->predicted_outcome,
+                    'opponent_name'  => $match->opponent_name,
+                    'location'       => $match->location,
+                    'kickoff_at'     => $match->kickoff_at?->toDateTimeString(),
+                    'is_home'        => $match->is_home,
+                    'home_name'      => $homeName,
+                    'away_name'      => $awayName,
+                    'home_score'     => $match->home_score,
+                    'away_score'     => $match->away_score,
+                    'result_outcome' => $match->result_outcome,
+                    'is_cancelled'   => $match->is_cancelled,
+                    'can_predict'    => !$match->is_cancelled && $withinWindow && ($match->kickoff_at?->isFuture() ?? false),
+                    'user_prediction'=> $prediction?->predicted_outcome,
+                    'user_predicted_home_score' => $prediction?->predicted_home_score,
+                    'user_predicted_away_score' => $prediction?->predicted_away_score,
+                    'is_double'      => $prediction?->is_double ?? false,
                 ];
             });
 
@@ -108,50 +134,342 @@ class PredictionController extends Controller
             ->exists();
 
         return response()->json([
-            'week_id'      => $matchWeek->id,
-            'week_number'  => $matchWeek->number,
-            'week_start'   => $weekStart->toDateString(),
-            'week_end'     => $weekEnd->toDateString(),
-            'week_label'   => $matchWeek->label,
-            'bonus_awarded'=> $bonusAwarded,
-            'matches'      => $matches,
+            'week_id'       => $matchWeek->id,
+            'week_number'   => $matchWeek->number,
+            'week_start'    => $weekStart->toDateString(),
+            'week_end'      => $weekEnd->toDateString(),
+            'week_label'    => $matchWeek->label,
+            'bonus_awarded' => $bonusAwarded,
+            'matches'       => $matches,
         ]);
     }
 
+    // ─── store ───────────────────────────────────────────────────────────────────
     public function store(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $user      = $request->user();
         $validated = $request->validate([
-            'match_id' => 'required|exists:club_matches,id',
-            'predicted_outcome' => 'required|in:home,draw,away',
+            'match_id'             => 'required|exists:club_matches,id',
+            'predicted_home_score' => 'required|integer|min:0|max:99',
+            'predicted_away_score' => 'required|integer|min:0|max:99',
+            'is_double'            => 'sometimes|boolean',
         ]);
 
-        $match = ClubMatch::findOrFail($validated['match_id']);
+        $match  = ClubMatch::findOrFail($validated['match_id']);
+        $window = $this->predictionWindowForMatch($match);
+        if ($window) {
+            [$windowStart, $windowClose] = $window;
+            $now = now();
+            if ($now->lessThan($windowStart)) {
+                return response()->json(['message' => "Les pronostics ouvrent le lundi."], 422);
+            }
+            if ($now->greaterThan($windowClose)) {
+                return response()->json(['message' => "Les pronostics sont clos (vendredi midi)."], 422);
+            }
+        }
+        if ($match->is_cancelled) {
+            return response()->json(['message' => "Le match est annulé."], 422);
+        }
         if ($match->kickoff_at && $match->kickoff_at->isPast()) {
             return response()->json(['message' => "Le match a déjà commencé."], 422);
         }
 
+        $predictedOutcome = $validated['predicted_home_score'] > $validated['predicted_away_score']
+            ? 'home'
+            : ($validated['predicted_home_score'] < $validated['predicted_away_score'] ? 'away' : 'draw');
+
+        $isDouble = $validated['is_double'] ?? false;
+
         $prediction = MatchPrediction::updateOrCreate(
             ['club_match_id' => $match->id, 'user_id' => $user->id],
-            ['predicted_outcome' => $validated['predicted_outcome']]
+            [
+                'predicted_outcome'    => $predictedOutcome,
+                'predicted_home_score' => $validated['predicted_home_score'],
+                'predicted_away_score' => $validated['predicted_away_score'],
+                'is_double'            => $isDouble,
+            ]
         );
 
-        $bonusAwarded = $this->awardWeeklyBonusIfEligible($user->id, $match->kickoff_at);
+        if ($isDouble) {
+            $weekId = $match->match_week_id;
+            if ($weekId) {
+                MatchPrediction::where('user_id', $user->id)
+                    ->where('club_match_id', '!=', $match->id)
+                    ->whereHas('match', fn($q) => $q->where('match_week_id', $weekId))
+                    ->update(['is_double' => false]);
+            } elseif ($match->kickoff_at) {
+                $weekStart = $match->kickoff_at->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+                $weekEnd   = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+                MatchPrediction::where('user_id', $user->id)
+                    ->where('club_match_id', '!=', $match->id)
+                    ->whereHas('match', fn($q) => $q->whereBetween('kickoff_at', [$weekStart, $weekEnd]))
+                    ->update(['is_double' => false]);
+            }
+        }
+
+        // +10 XP pour avoir pronostiqué
+        $user->load('profile');
+        if ($user->profile) {
+            $user->profile->addExperience(10);
+        }
+
+        // +20 coins premier pronostic de la semaine
+        $weekId            = $match->match_week_id;
+        $isFirstPrediction = !MatchPrediction::where('user_id', $user->id)
+            ->where('club_match_id', '!=', $match->id)
+            ->whereHas('match', function ($q) use ($weekId, $match) {
+                if ($weekId) {
+                    $q->where('match_week_id', $weekId);
+                } elseif ($match->kickoff_at) {
+                    $weekStart = $match->kickoff_at->copy()->startOfWeek(\Carbon\Carbon::MONDAY)->startOfDay();
+                    $weekEnd   = $weekStart->copy()->endOfWeek(\Carbon\Carbon::SUNDAY)->endOfDay();
+                    $q->whereBetween('kickoff_at', [$weekStart, $weekEnd]);
+                }
+            })
+            ->exists();
+        if ($isFirstPrediction) {
+            $user->addCoins(20);
+            $user->refresh();
+        }
+
+        $this->prepareWeeklyBonusIfEligible($user->id, $match);
 
         return response()->json([
-            'message' => 'Pronostic enregistré.',
+            'message'    => 'Pronostic enregistré.',
             'prediction' => [
-                'id' => $prediction->id,
-                'match_id' => $prediction->club_match_id,
-                'predicted_outcome' => $prediction->predicted_outcome,
+                'id'                      => $prediction->id,
+                'match_id'                => $prediction->club_match_id,
+                'predicted_outcome'       => $prediction->predicted_outcome,
+                'predicted_home_score'    => $prediction->predicted_home_score,
+                'predicted_away_score'    => $prediction->predicted_away_score,
+                'is_double'               => $prediction->is_double,
             ],
-            'bonus_awarded' => $bonusAwarded,
         ]);
     }
 
-    public function history(Request $request): JsonResponse
+    // ─── results ─────────────────────────────────────────────────────────────────
+    public function results(Request $request): JsonResponse
     {
         $user = $request->user();
+
+        // Toutes les prédictions avec les matchs
+        $predictions = MatchPrediction::where('user_id', $user->id)
+            ->with('match.matchWeek', 'match.clubTeam')
+            ->get();
+
+        if ($predictions->isEmpty()) {
+            return response()->json(['weeks' => []]);
+        }
+
+        // Grouper par semaine
+        $weekGroups = [];
+        foreach ($predictions as $pred) {
+            $match = $pred->match;
+            if (!$match) continue;
+            $weekKey = $this->weekKeyForMatch($match);
+            $weekGroups[$weekKey][] = $pred;
+        }
+
+        // Bonuses existants
+        $bonuses = PredictionWeeklyBonus::where('user_id', $user->id)
+            ->get()
+            ->keyBy(fn($b) => $b->week_start_date->toDateString());
+
+        $weeks = [];
+        foreach ($weekGroups as $weekStart => $preds) {
+            $total    = count($preds);
+            $settled  = 0;
+            $correct  = 0;
+            $exact    = 0;
+            $matches  = [];
+            $coinsInd = 0;
+            $xpInd    = 0;
+
+            // Infos semaine
+            $firstMatch = $preds[0]->match;
+            $weekEnd    = $firstMatch->matchWeek?->end_date?->toDateString()
+                ?? Carbon::parse($weekStart)->endOfWeek(Carbon::SUNDAY)->toDateString();
+            $weekLabel  = $firstMatch->matchWeek?->label
+                ?? 'Semaine du ' . Carbon::parse($weekStart)->format('d/m');
+
+            foreach ($preds as $pred) {
+                $m          = $pred->match;
+                $hasResult  = $m->result_outcome !== null && !$m->is_cancelled;
+                if ($hasResult) $settled++;
+
+                $exactScore = $hasResult
+                    && $pred->predicted_home_score !== null
+                    && $pred->predicted_home_score === $m->home_score
+                    && $pred->predicted_away_score === $m->away_score;
+                $goodWinner = $hasResult && $pred->predicted_outcome === $m->result_outcome;
+
+                if ($exactScore) { $exact++; $correct++; }
+                elseif ($goodWinner) $correct++;
+
+                $mCoins = 0;
+                $mXp    = 0;
+                $rtype  = 'none';
+                if ($exactScore) {
+                    $mCoins = self::COINS_EXACT;  $mXp = self::XP_EXACT;  $rtype = 'exact';
+                } elseif ($goodWinner) {
+                    $mCoins = self::COINS_WINNER; $mXp = self::XP_WINNER; $rtype = 'winner';
+                }
+                if ($pred->is_double && $mCoins > 0) $mCoins *= 2;
+
+                $coinsInd += $mCoins;
+                $xpInd    += $mXp;
+
+                $clubName = $m->clubTeam?->short_name ?: $m->clubTeam?->name;
+                $matches[] = [
+                    'id'                        => $m->id,
+                    'home_name'                 => $m->is_home ? $clubName : $m->opponent_name,
+                    'away_name'                 => $m->is_home ? $m->opponent_name : $clubName,
+                    'home_score'                => $m->home_score,
+                    'away_score'                => $m->away_score,
+                    'result_outcome'            => $m->result_outcome,
+                    'kickoff_at'                => $m->kickoff_at?->toDateTimeString(),
+                    'is_cancelled'              => $m->is_cancelled,
+                    'user_prediction'           => $pred->predicted_outcome,
+                    'user_predicted_home_score' => $pred->predicted_home_score,
+                    'user_predicted_away_score' => $pred->predicted_away_score,
+                    'is_double'                 => $pred->is_double,
+                    'reward_type'               => $rtype,
+                    'coins_earned'              => $mCoins,
+                    'xp_earned'                 => $mXp,
+                ];
+            }
+
+            $bonus         = $bonuses->get($weekStart);
+            $bonusCoins    = $bonus?->coins_earned ?? 0;
+            $bonusXp       = $bonus?->xp_earned ?? 0;
+            $isSettled     = $settled === $total && $total > 0;
+            $isClaimable   = $isSettled && (!$bonus || $bonus->claimed_at === null);
+            $claimedAt     = $bonus?->claimed_at;
+
+            $weeks[] = [
+                'week_start'          => $weekStart,
+                'week_end'            => $weekEnd,
+                'week_label'          => $weekLabel,
+                'total_predictions'   => $total,
+                'settled_predictions' => $settled,
+                'correct_predictions' => $correct,
+                'exact_predictions'   => $exact,
+                'coins_to_claim'      => $coinsInd + $bonusCoins,
+                'xp_to_claim'         => $xpInd + $bonusXp,
+                'is_settled'          => $isSettled,
+                'is_claimable'        => $isClaimable,
+                'claimed_at'          => $claimedAt?->toIso8601String(),
+                'matches'             => $matches,
+            ];
+        }
+
+        usort($weeks, fn($a, $b) => strcmp($b['week_start'], $a['week_start']));
+
+        return response()->json(['weeks' => $weeks]);
+    }
+
+    // ─── claimWeek ───────────────────────────────────────────────────────────────
+    public function claimWeek(Request $request, string $weekStart): JsonResponse
+    {
+        $user           = $request->user();
+        $weekStartDate  = Carbon::parse($weekStart)->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $weekEndDate    = $weekStartDate->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+
+        return DB::transaction(function () use ($user, $weekStartDate, $weekEndDate) {
+            // Vérif déjà récupéré
+            $bonus = PredictionWeeklyBonus::where('user_id', $user->id)
+                ->where('week_start_date', $weekStartDate->toDateString())
+                ->lockForUpdate()
+                ->first();
+
+            if ($bonus && $bonus->claimed_at) {
+                return response()->json(['message' => 'Déjà récupéré.'], 422);
+            }
+
+            // Récupérer toutes les prédictions de la semaine
+            $predictions = MatchPrediction::where('user_id', $user->id)
+                ->with('match')
+                ->whereHas('match', function ($q) use ($weekStartDate, $weekEndDate) {
+                    $q->where('is_cancelled', false)
+                      ->where(function ($q2) use ($weekStartDate, $weekEndDate) {
+                          $q2->whereHas('matchWeek', fn($q3) => $q3->whereDate('start_date', $weekStartDate->toDateString()))
+                             ->orWhereBetween('kickoff_at', [$weekStartDate, $weekEndDate]);
+                      });
+                })
+                ->get();
+
+            if ($predictions->isEmpty()) {
+                return response()->json(['message' => 'Aucun pronostic cette semaine.'], 422);
+            }
+
+            // Vérif tous les matchs terminés
+            $allSettled = $predictions->every(fn($p) => $p->match?->result_outcome !== null);
+            if (!$allSettled) {
+                return response()->json(['message' => 'Tous les matchs ne sont pas terminés.'], 422);
+            }
+
+            // Calculer récompenses individuelles
+            $totalCoins = 0;
+            $totalXp    = 0;
+
+            foreach ($predictions as $pred) {
+                $m     = $pred->match;
+                $exact  = $pred->predicted_home_score !== null
+                        && $pred->predicted_home_score === $m->home_score
+                        && $pred->predicted_away_score === $m->away_score;
+                $winner = $pred->predicted_outcome === $m->result_outcome;
+
+                if ($exact) {
+                    $c = self::COINS_EXACT; $x = self::XP_EXACT;
+                } elseif ($winner) {
+                    $c = self::COINS_WINNER; $x = self::XP_WINNER;
+                } else {
+                    continue;
+                }
+                if ($pred->is_double) $c *= 2;
+                $totalCoins += $c;
+                $totalXp    += $x;
+            }
+
+            // Bonus hebdomadaire stocké
+            if ($bonus) {
+                $totalCoins += $bonus->coins_earned;
+                $totalXp    += $bonus->xp_earned;
+                $bonus->update(['claimed_at' => now()]);
+            } else {
+                // Calculer et créer le bonus maintenant (cas où il n'a pas été créé automatiquement)
+                [$bonusCoins, $bonusXp] = $this->computeWeeklyBonus($predictions, $weekStartDate);
+                $totalCoins += $bonusCoins;
+                $totalXp    += $bonusXp;
+                PredictionWeeklyBonus::create([
+                    'user_id'         => $user->id,
+                    'week_start_date' => $weekStartDate->toDateString(),
+                    'awarded_at'      => now(),
+                    'coins_earned'    => $bonusCoins,
+                    'xp_earned'       => $bonusXp,
+                    'claimed_at'      => now(),
+                ]);
+            }
+
+            // Donner les récompenses
+            if ($totalCoins > 0) $user->addCoins($totalCoins);
+            $user->load('profile');
+            if ($totalXp > 0 && $user->profile) {
+                $user->profile->addExperience($totalXp);
+            }
+
+            return response()->json([
+                'message'     => 'Récompenses récupérées !',
+                'coins_earned'=> $totalCoins,
+                'xp_earned'   => $totalXp,
+            ]);
+        });
+    }
+
+    // ─── history ─────────────────────────────────────────────────────────────────
+    public function history(Request $request): JsonResponse
+    {
+        $user  = $request->user();
         $query = ClubMatch::with([
             'clubTeam',
             'predictions' => fn($q) => $q->where('user_id', $user->id),
@@ -161,37 +479,33 @@ class PredictionController extends Controller
 
         if ($request->filled('week_start')) {
             $weekStart = Carbon::parse($request->week_start)->startOfWeek(Carbon::MONDAY)->startOfDay();
-            $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+            $weekEnd   = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
             $query->whereBetween('kickoff_at', [$weekStart, $weekEnd]);
         }
 
         $matches = $query->get()
             ->filter(fn($match) => $match->predictions->isNotEmpty())
             ->map(function (ClubMatch $match) {
-                $clubName = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
-                $homeName = $match->is_home ? $clubName : $match->opponent_name;
-                $awayName = $match->is_home ? $match->opponent_name : $clubName;
+                $clubName  = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
                 $prediction = $match->predictions->first();
-                $correct = $prediction && $prediction->predicted_outcome === $match->result_outcome;
-
+                $correct    = $prediction && $prediction->predicted_outcome === $match->result_outcome;
                 return [
-                    'id' => $match->id,
-                    'club_team' => $match->clubTeam ? [
-                        'id' => $match->clubTeam->id,
-                        'name' => $match->clubTeam->name,
-                        'short_name' => $match->clubTeam->short_name,
-                    ] : null,
-                    'opponent_name' => $match->opponent_name,
-                    'location' => $match->location,
-                    'kickoff_at' => $match->kickoff_at?->toDateTimeString(),
-                    'is_home' => $match->is_home,
-                    'home_name' => $homeName,
-                    'away_name' => $awayName,
-                    'home_score' => $match->home_score,
-                    'away_score' => $match->away_score,
-                    'result_outcome' => $match->result_outcome,
-                    'user_prediction' => $prediction?->predicted_outcome,
-                    'is_correct' => $correct,
+                    'id'                        => $match->id,
+                    'club_team'                 => $match->clubTeam ? ['id' => $match->clubTeam->id, 'name' => $match->clubTeam->name, 'short_name' => $match->clubTeam->short_name] : null,
+                    'opponent_name'             => $match->opponent_name,
+                    'location'                  => $match->location,
+                    'kickoff_at'                => $match->kickoff_at?->toDateTimeString(),
+                    'is_home'                   => $match->is_home,
+                    'home_name'                 => $match->is_home ? $clubName : $match->opponent_name,
+                    'away_name'                 => $match->is_home ? $match->opponent_name : $clubName,
+                    'home_score'                => $match->home_score,
+                    'away_score'                => $match->away_score,
+                    'result_outcome'            => $match->result_outcome,
+                    'user_prediction'           => $prediction?->predicted_outcome,
+                    'user_predicted_home_score' => $prediction?->predicted_home_score,
+                    'user_predicted_away_score' => $prediction?->predicted_away_score,
+                    'is_double'                 => $prediction?->is_double ?? false,
+                    'is_correct'                => $correct,
                 ];
             })
             ->values();
@@ -199,11 +513,12 @@ class PredictionController extends Controller
         return response()->json(['matches' => $matches]);
     }
 
+    // ─── leaderboard ─────────────────────────────────────────────────────────────
     public function leaderboard(Request $request): JsonResponse
     {
-        $scope = $request->input('scope', 'week');
+        $scope     = $request->input('scope', 'week');
         $weekStart = null;
-        $weekEnd = null;
+        $weekEnd   = null;
 
         if ($scope !== 'global') {
             $weekStart = $request->filled('week_start')
@@ -212,91 +527,222 @@ class PredictionController extends Controller
             $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
         }
 
-        $rows = MatchPrediction::query()
-            ->select([
-                'match_predictions.user_id',
-                DB::raw("SUM(CASE WHEN match_predictions.predicted_outcome = club_matches.result_outcome THEN 1 ELSE 0 END) AS correct"),
-                DB::raw("COUNT(*) AS total"),
-            ])
-            ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
-            ->whereNotNull('club_matches.result_outcome');
+        $allMatchesQuery = ClubMatch::with('matchWeek')
+            ->whereNotNull('result_outcome')
+            ->where('is_cancelled', false);
+        if ($weekEnd) $allMatchesQuery->where('kickoff_at', '<=', $weekEnd);
+        $allMatches  = $allMatchesQuery->get();
+        $allMatchIds = $allMatches->pluck('id')->all();
+        $matchById   = $allMatches->keyBy('id');
 
-        if ($weekStart && $weekEnd) {
-            $rows->whereBetween('club_matches.kickoff_at', [$weekStart, $weekEnd]);
+        if (empty($allMatchIds)) {
+            return response()->json(['scope' => $scope, 'week_start' => $weekStart?->toDateString(), 'week_end' => $weekEnd?->toDateString(), 'leaderboard' => []]);
         }
 
-        $rows = $rows
-            ->groupBy('match_predictions.user_id')
-            ->orderByDesc('correct')
-            ->orderByDesc('total')
-            ->get();
+        $predictions = MatchPrediction::whereIn('club_match_id', $allMatchIds)->get();
 
-        $userIds = $rows->pluck('user_id')->all();
-        $users = \App\Models\User::whereIn('id', $userIds)
-            ->get(['id', 'name'])
-            ->keyBy('id');
+        $weekMatches = [];
+        foreach ($allMatches as $match) {
+            $wk = $this->weekKeyForMatch($match);
+            if (!isset($weekMatches[$wk])) $weekMatches[$wk] = ['total' => 0];
+            $weekMatches[$wk]['total'] += 1;
+        }
+        $weekKeys = collect(array_keys($weekMatches))->sort()->values();
 
-        $rank = 1;
-        $leaderboard = $rows->map(function ($row) use ($users, &$rank) {
-            $user = $users->get($row->user_id);
-            $correct = (int) $row->correct;
-            $total = (int) $row->total;
-            $entry = [
-                'rank' => $rank,
-                'user_id' => $row->user_id,
-                'name' => $user?->name ?? 'Utilisateur',
-                'correct' => $correct,
-                'total' => $total,
-                'points' => $correct * 50,
+        $userWeekStats = [];
+        foreach ($predictions as $pred) {
+            $match = $matchById->get($pred->club_match_id);
+            if (!$match) continue;
+            $wk = $this->weekKeyForMatch($match);
+            if (!isset($userWeekStats[$pred->user_id][$wk])) {
+                $userWeekStats[$pred->user_id][$wk] = ['predicted' => 0, 'correct' => 0];
+            }
+            $userWeekStats[$pred->user_id][$wk]['predicted'] += 1;
+            if ($pred->predicted_outcome === $match->result_outcome) {
+                $userWeekStats[$pred->user_id][$wk]['correct'] += 1;
+            }
+        }
+
+        $bonusByUserWeek = [];
+        foreach ($userWeekStats as $userId => $stats) {
+            $streak = 0; $lastWeek = null;
+            foreach ($weekKeys as $wk) {
+                $totalM   = $weekMatches[$wk]['total'] ?? 0;
+                if ($totalM === 0) continue;
+                $predicted = $stats[$wk]['predicted'] ?? 0;
+                $correct   = $stats[$wk]['correct'] ?? 0;
+                $required  = min(2, $totalM);
+                $rate      = $totalM > 0 ? ($correct / $totalM) : 0;
+                $qualifies = $predicted >= $required && $rate >= 0.5;
+                if ($qualifies) {
+                    if ($lastWeek) {
+                        $diff   = Carbon::parse($wk)->diffInDays(Carbon::parse($lastWeek));
+                        $streak = ($diff === 7 && $streak > 0) ? $streak + 1 : 1;
+                    } else { $streak = 1; }
+                    $lastWeek = $wk;
+                    if ($streak === 3) $bonusByUserWeek[$userId][$wk] = ($bonusByUserWeek[$userId][$wk] ?? 0) + 2;
+                    if ($streak === 5) $bonusByUserWeek[$userId][$wk] = ($bonusByUserWeek[$userId][$wk] ?? 0) + 5;
+                } else { $streak = 0; $lastWeek = $wk; }
+            }
+        }
+
+        $matchesForPoints = $allMatches;
+        if ($weekStart && $weekEnd) {
+            $matchesForPoints = $allMatches->filter(fn($m) => $m->kickoff_at && $m->kickoff_at->between($weekStart, $weekEnd));
+        }
+        $matchIdsForPoints = $matchesForPoints->pluck('id')->flip();
+
+        $pointsByUser  = [];
+        $correctByUser = [];
+        $totalByUser   = [];
+
+        foreach ($predictions as $pred) {
+            if (!isset($matchIdsForPoints[$pred->club_match_id])) continue;
+            $match = $matchById->get($pred->club_match_id);
+            if (!$match) continue;
+            $exact       = $pred->predicted_home_score === $match->home_score && $pred->predicted_away_score === $match->away_score;
+            $winnerOk    = $pred->predicted_outcome === $match->result_outcome;
+            $points      = $exact ? 5 : ($winnerOk ? 3 : 0);
+            if ($pred->is_double) $points *= 2;
+            $pointsByUser[$pred->user_id]  = ($pointsByUser[$pred->user_id] ?? 0) + $points;
+            $totalByUser[$pred->user_id]   = ($totalByUser[$pred->user_id] ?? 0) + 1;
+            if ($winnerOk) $correctByUser[$pred->user_id] = ($correctByUser[$pred->user_id] ?? 0) + 1;
+        }
+
+        if ($scope !== 'global' && $weekStart) {
+            $wk = $weekStart->toDateString();
+            foreach ($bonusByUserWeek as $uid => $weeks) {
+                $b = $weeks[$wk] ?? 0;
+                if ($b > 0) $pointsByUser[$uid] = ($pointsByUser[$uid] ?? 0) + $b;
+            }
+        } else {
+            foreach ($bonusByUserWeek as $uid => $weeks) {
+                $sum = array_sum($weeks);
+                if ($sum > 0) $pointsByUser[$uid] = ($pointsByUser[$uid] ?? 0) + $sum;
+            }
+        }
+
+        $userIds     = array_unique(array_merge(array_keys($pointsByUser), array_keys($totalByUser)));
+        $users       = \App\Models\User::whereIn('id', $userIds)->get(['id', 'name'])->keyBy('id');
+
+        $rank        = 1;
+        $leaderboard = collect($userIds)->map(function ($uid) use ($users, $pointsByUser, $correctByUser, $totalByUser) {
+            return [
+                'user_id' => $uid,
+                'name'    => $users->get($uid)?->name ?? 'Utilisateur',
+                'correct' => (int) ($correctByUser[$uid] ?? 0),
+                'total'   => (int) ($totalByUser[$uid] ?? 0),
+                'points'  => (int) ($pointsByUser[$uid] ?? 0),
             ];
-            $rank++;
-            return $entry;
-        });
+        })->sort(fn($a, $b) => [$b['points'], $b['correct'], $b['total']] <=> [$a['points'], $a['correct'], $a['total']])->values()
+          ->map(function ($e) use (&$rank) { $e['rank'] = $rank++; return $e; });
 
-        return response()->json([
-            'scope' => $scope,
-            'week_start' => $weekStart?->toDateString(),
-            'week_end' => $weekEnd?->toDateString(),
-            'leaderboard' => $leaderboard,
-        ]);
+        return response()->json(['scope' => $scope, 'week_start' => $weekStart?->toDateString(), 'week_end' => $weekEnd?->toDateString(), 'leaderboard' => $leaderboard]);
     }
 
-    private function awardWeeklyBonusIfEligible(int $userId, ?Carbon $kickoffAt): bool
+    // ─── Helpers ─────────────────────────────────────────────────────────────────
+    private function weekKeyForMatch(ClubMatch $match): string
     {
-        if (!$kickoffAt) return false;
+        $date = $match->matchWeek?->start_date ?? $match->kickoff_at;
+        if (!$date) return '1970-01-01';
+        return $date->copy()->startOfWeek(Carbon::MONDAY)->toDateString();
+    }
 
-        $weekStart = $kickoffAt->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
-        $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+    private function predictionWindowForMatch(ClubMatch $match): ?array
+    {
+        $weekStart = $match->matchWeek?->start_date?->copy()->startOfDay();
+        if (!$weekStart && $match->kickoff_at) {
+            $weekStart = $match->kickoff_at->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        }
+        if (!$weekStart) return null;
+        return [$weekStart, $weekStart->copy()->addDays(4)->setTime(12, 0)];
+    }
 
-        $matchesCount = ClubMatch::whereBetween('kickoff_at', [$weekStart, $weekEnd])->count();
-        if ($matchesCount === 0) return false;
+    private function computeWeeklyBonus(\Illuminate\Support\Collection $predictions, Carbon $weekStart): array
+    {
+        $total   = $predictions->count();
+        if ($total < 2) return [0, 0];
 
-        $predictionsCount = MatchPrediction::where('user_id', $userId)
-            ->whereHas('match', fn($q) => $q->whereBetween('kickoff_at', [$weekStart, $weekEnd]))
-            ->count();
+        $correct = $predictions->filter(function ($p) {
+            if (!$p->match || $p->match->result_outcome === null) return false;
+            $exact  = $p->predicted_home_score === $p->match->home_score && $p->predicted_away_score === $p->match->away_score;
+            $winner = $p->predicted_outcome === $p->match->result_outcome;
+            return $exact || $winner;
+        })->count();
 
-        if ($predictionsCount < $matchesCount) return false;
+        $rate = $total > 0 ? $correct / $total : 0;
+        $coins = match(true) {
+            $rate >= 0.51 => 500,
+            $rate >= 0.30 => 250,
+            $rate >  0    => 100,
+            default       => 0,
+        };
 
-        return DB::transaction(function () use ($userId, $weekStart) {
-            $existing = PredictionWeeklyBonus::where('user_id', $userId)
-                ->where('week_start_date', $weekStart->toDateString())
-                ->lockForUpdate()
-                ->first();
+        // Streak: bonus semaine précédente
+        $lastWeekStart = $weekStart->copy()->subWeek();
+        $hadStreak     = PredictionWeeklyBonus::where('user_id', $predictions->first()->user_id)
+            ->where('week_start_date', $lastWeekStart->toDateString())
+            ->whereNotNull('claimed_at')
+            ->exists();
+        if ($hadStreak && $coins > 0) $coins += 100;
 
-            if ($existing) return false;
+        $xp = 0;
+        foreach ($predictions as $p) {
+            if (!$p->match || $p->match->result_outcome === null) continue;
+            $exact  = $p->predicted_home_score === $p->match->home_score && $p->predicted_away_score === $p->match->away_score;
+            $winner = $p->predicted_outcome === $p->match->result_outcome;
+            if ($exact) $xp += self::XP_EXACT;
+            elseif ($winner) $xp += self::XP_WINNER;
+        }
+        if ($hadStreak) $xp += 50;
 
-            $bonus = PredictionWeeklyBonus::create([
-                'user_id' => $userId,
+        return [$coins, $xp];
+    }
+
+    private function prepareWeeklyBonusIfEligible(int $userId, ClubMatch $match): void
+    {
+        $weekStart = $match->matchWeek?->start_date?->copy()->startOfDay();
+        $weekEnd   = $match->matchWeek?->end_date?->copy()->endOfDay();
+        $weekId    = $match->match_week_id;
+
+        if (!$weekStart || !$weekEnd) {
+            if (!$match->kickoff_at) return;
+            $weekStart = $match->kickoff_at->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+            $weekEnd   = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+        }
+
+        if (PredictionWeeklyBonus::where('user_id', $userId)->where('week_start_date', $weekStart->toDateString())->exists()) return;
+
+        $predictions = MatchPrediction::where('user_id', $userId)
+            ->with('match')
+            ->whereHas('match', function ($q) use ($weekId, $weekStart, $weekEnd) {
+                if ($weekId) {
+                    $q->where('match_week_id', $weekId)->where('is_cancelled', false);
+                } else {
+                    $q->whereBetween('kickoff_at', [$weekStart, $weekEnd])->where('is_cancelled', false);
+                }
+            })
+            ->get();
+
+        if ($predictions->count() < 2) return;
+
+        $settled = $predictions->filter(fn($p) => $p->match?->result_outcome !== null);
+        if ($settled->count() < $predictions->count()) return;
+        if ($settled->count() < 2) return;
+
+        [$coins, $xp] = $this->computeWeeklyBonus($settled, $weekStart);
+        if ($coins <= 0) return;
+
+        DB::transaction(function () use ($userId, $weekStart, $coins, $xp) {
+            if (PredictionWeeklyBonus::where('user_id', $userId)->where('week_start_date', $weekStart->toDateString())->lockForUpdate()->exists()) return;
+            PredictionWeeklyBonus::create([
+                'user_id'         => $userId,
                 'week_start_date' => $weekStart->toDateString(),
-                'awarded_at' => now(),
+                'awarded_at'      => now(),
+                'coins_earned'    => $coins,
+                'xp_earned'       => $xp,
+                'claimed_at'      => null,
             ]);
-
-            if ($bonus) {
-                \App\Models\User::where('id', $userId)->increment('coins', 10);
-                return true;
-            }
-
-            return false;
         });
     }
 }

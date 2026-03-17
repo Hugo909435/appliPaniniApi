@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Jobs\AwardPredictionRewards;
 use App\Models\ClubMatch;
 use App\Models\ClubTeam;
+use App\Models\MatchPrediction;
+use App\Models\MatchWeek;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -48,7 +50,6 @@ class ClubMatchController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'match_week_id' => 'nullable|integer|exists:match_weeks,id',
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
             'location' => 'nullable|string|max:150',
@@ -56,9 +57,15 @@ class ClubMatchController extends Controller
             'is_home' => 'required|boolean',
             'home_score' => 'nullable|integer|min:0|max:99',
             'away_score' => 'nullable|integer|min:0|max:99',
+            'is_cancelled' => 'sometimes|boolean',
         ]);
 
         $validated['location'] = $request->input('location') ?? '';
+        $validated['match_week_id'] = $this->resolveMatchWeekId($validated['kickoff_at']);
+        if (!empty($validated['is_cancelled'])) {
+            $validated['home_score'] = null;
+            $validated['away_score'] = null;
+        }
 
         $match = ClubMatch::create($validated);
         $this->applyResultIfAny($match);
@@ -69,7 +76,6 @@ class ClubMatchController extends Controller
     public function update(Request $request, ClubMatch $clubMatch): JsonResponse
     {
         $validated = $request->validate([
-            'match_week_id' => 'nullable|integer|exists:match_weeks,id',
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
             'location' => 'nullable|string|max:150',
@@ -77,9 +83,15 @@ class ClubMatchController extends Controller
             'is_home' => 'required|boolean',
             'home_score' => 'nullable|integer|min:0|max:99',
             'away_score' => 'nullable|integer|min:0|max:99',
+            'is_cancelled' => 'sometimes|boolean',
         ]);
 
         $validated['location'] = $validated['location'] ?? '';
+        $validated['match_week_id'] = $this->resolveMatchWeekId($validated['kickoff_at']);
+        if (!empty($validated['is_cancelled'])) {
+            $validated['home_score'] = null;
+            $validated['away_score'] = null;
+        }
 
         $previousOutcome = $clubMatch->result_outcome;
         $clubMatch->update($validated);
@@ -96,6 +108,11 @@ class ClubMatchController extends Controller
 
     private function applyResultIfAny(ClubMatch $match, ?string $previousOutcome = null): void
     {
+        if ($match->is_cancelled) {
+            $match->update(['result_outcome' => null, 'result_set_at' => null]);
+            MatchPrediction::where('club_match_id', $match->id)->delete();
+            return;
+        }
         $outcome = $match->computeOutcome();
         if (!$outcome) {
             if ($match->result_outcome !== null || $match->result_set_at !== null) {
@@ -112,6 +129,25 @@ class ClubMatchController extends Controller
         if ($previousOutcome !== $outcome) {
             AwardPredictionRewards::dispatch($match->id);
         }
+    }
+
+    private function resolveMatchWeekId(string $kickoffAt): ?int
+    {
+        $kickoff = Carbon::parse($kickoffAt);
+        $start = $kickoff->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $end = $start->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+
+        $existing = MatchWeek::whereDate('start_date', $start->toDateString())->first();
+        if ($existing) return $existing->id;
+
+        $nextNumber = (int) (MatchWeek::max('number') ?? 0) + 1;
+        $week = MatchWeek::create([
+            'number' => $nextNumber,
+            'start_date' => $start->toDateString(),
+            'end_date' => $end->toDateString(),
+            'label' => 'Semaine du ' . $start->format('d/m'),
+        ]);
+        return $week->id;
     }
 
     private function mapMatch(ClubMatch $match): array
@@ -138,6 +174,7 @@ class ClubMatchController extends Controller
             'home_score' => $match->home_score,
             'away_score' => $match->away_score,
             'result_outcome' => $match->result_outcome,
+            'is_cancelled' => $match->is_cancelled,
         ];
     }
 }

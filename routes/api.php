@@ -88,6 +88,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/predictions', [PredictionController::class, 'store']);
     Route::get('/predictions/history', [PredictionController::class, 'history']);
     Route::get('/predictions/leaderboard', [PredictionController::class, 'leaderboard']);
+    Route::get('/predictions/results', [PredictionController::class, 'results']);
+    Route::post('/predictions/claim/{weekStart}', [PredictionController::class, 'claimWeek']);
 });
 
 /*

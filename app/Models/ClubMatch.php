@@ -22,6 +22,7 @@ class ClubMatch extends Model
         'away_score',
         'result_outcome',
         'result_set_at',
+        'is_cancelled',
     ];
 
     protected function casts(): array
@@ -32,6 +33,7 @@ class ClubMatch extends Model
             'home_score' => 'integer',
             'away_score' => 'integer',
             'result_set_at' => 'datetime',
+            'is_cancelled' => 'boolean',
         ];
     }
 

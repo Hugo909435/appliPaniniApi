@@ -92,13 +92,6 @@ class CardSeeder extends Seeder
             ]);
         }
 
-        $exclusiveIds = Card::whereHas('rarity', function ($query) {
-            $query->where('slug', 'legendary');
-        })->inRandomOrder()->take(3)->pluck('id');
-
-        if ($exclusiveIds->isNotEmpty()) {
-            Card::whereIn('id', $exclusiveIds)->update(['is_exclusive' => true]);
-        }
 
         $this->command->info('Cartes créées avec succès.');
     }

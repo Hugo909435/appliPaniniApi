@@ -14,7 +14,7 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, Billable;
 
-    const MAX_FREE_PACKS = 2;
+    const MAX_FREE_PACKS = 1;
 
     protected $fillable = [
         'name',
@@ -109,7 +109,10 @@ class User extends Authenticatable
             return true;
         }
 
-        return $this->last_free_pack_claimed_at->lt(now()->startOfDay());
+        // Weekly check: can claim if last claimed before the start of the current week
+        return $this->last_free_pack_claimed_at->lt(
+            now()->startOfWeek(\Carbon\Carbon::MONDAY)
+        );
     }
 
     public function claimFreePack(): bool

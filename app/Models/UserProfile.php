@@ -155,7 +155,7 @@ class UserProfile extends Model
     public function getXpForNextLevel(?int $level = null): int
     {
         $level = $level ?? ($this->user?->level ?? 1);
-        return max(1, $level) * 100;
+        return 100 + (max(1, $level) * 20);
     }
 
     public function getProgressToNextLevel(): float
@@ -166,10 +166,15 @@ class UserProfile extends Model
 
     private function grantLevelRewards(int $level): void
     {
+        // Every level up: +100 coins
+        $this->user->addCoins(100);
+
+        // Every 5 levels: +300 bonus coins
         if ($level % 5 === 0) {
-            $this->user->addCoins(100);
+            $this->user->addCoins(300);
         }
 
+        // Every 10 levels: +1 pack (normal drop)
         if ($level % 10 === 0) {
             $this->user->increment('free_packs');
         }

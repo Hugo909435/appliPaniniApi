@@ -14,6 +14,9 @@ class MatchPrediction extends Model
         'club_match_id',
         'user_id',
         'predicted_outcome',
+        'predicted_home_score',
+        'predicted_away_score',
+        'is_double',
         'rewarded_at',
     ];
 
@@ -21,6 +24,9 @@ class MatchPrediction extends Model
     {
         return [
             'rewarded_at' => 'datetime',
+            'predicted_home_score' => 'integer',
+            'predicted_away_score' => 'integer',
+            'is_double' => 'boolean',
         ];
     }
 

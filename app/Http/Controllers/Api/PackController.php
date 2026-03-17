@@ -1,9 +1,10 @@
-<?php
+﻿<?php
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Pack;
+use App\Models\Card;
 use App\Services\PackService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,12 +15,12 @@ class PackController extends Controller
 
     /** Raretés par défaut (même valeurs que PackService) */
     private const DEFAULT_RARITIES = [
-        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF', 'probability' => 55.0],
-        'uncommon'  => ['label' => 'Peu Commun', 'color' => '#10B981', 'probability' => 25.0],
-        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6', 'probability' => 12.0],
-        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6', 'probability' =>  6.0],
-        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B', 'probability' =>  1.5],
-        'icone'     => ['label' => 'Icône',      'color' => '#FFFFFF', 'probability' =>  0.5],
+        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF', 'probability' => 38.0],
+        'uncommon'  => ['label' => 'Peu commun', 'color' => '#10B981', 'probability' => 28.0],
+        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6', 'probability' => 16.0],
+        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6', 'probability' =>  8.0],
+        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B', 'probability' =>  3.5],
+        'icone'     => ['label' => 'Icône',      'color' => '#EF4444', 'probability' =>  1.5],
     ];
 
     private function buildRarities(Pack $pack): array
@@ -33,6 +34,18 @@ class PackController extends Controller
                 'label'       => $meta['label'],
                 'color'       => $meta['color'],
                 'probability' => $boosts[$slug] ?? $meta['probability'],
+                'per_pack'    => false,
+            ];
+        }
+
+        $hasSpecial = Card::whereHas('rarity', fn($q) => $q->where('slug', 'special'))->exists();
+        if ($hasSpecial) {
+            $result[] = [
+                'rarity'      => 'special',
+                'label'       => 'Spécial',
+                'color'       => '#22D3EE',
+                'probability' => $boosts['special'] ?? \App\Services\PackService::PAID_SPECIAL_CHANCE,
+                'per_pack'    => false,
             ];
         }
 
@@ -176,6 +189,3 @@ class PackController extends Controller
         ]);
     }
 }
-
-
-

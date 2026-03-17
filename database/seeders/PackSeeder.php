@@ -22,12 +22,13 @@ class PackSeeder extends Seeder
             'image' => null,
             'is_active' => true,
             'rarity_boosts' => [
-                'common' => 55.0,
-                'uncommon' => 25.0,
-                'rare' => 12.0,
-                'epic' => 6.0,
-                'legendary' => 1.5,
-                'icone' => 0.5,
+                'common' => 38.0,
+                'uncommon' => 28.0,
+                'rare' => 16.0,
+                'epic' => 8.0,
+                'legendary' => 3.5,
+                'icone' => 1.5,
+                'special' => 5.0,
             ],
         ]);
     }
