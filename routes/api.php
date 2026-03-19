@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\ChallengeController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\MoneyController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ProfileClubController;
 use App\Http\Controllers\Api\PredictionController;
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\UserController;
@@ -18,6 +19,10 @@ use App\Http\Controllers\Api\Admin\PackController as AdminPackController;
 use App\Http\Controllers\Api\Admin\ClubTeamController;
 use App\Http\Controllers\Api\Admin\ClubMatchController;
 use App\Http\Controllers\Api\Admin\MatchWeekAdminController;
+use App\Http\Controllers\Api\SuperAdmin\DashboardController as SuperDashboardController;
+use App\Http\Controllers\Api\SuperAdmin\ClubController as SuperClubController;
+use App\Http\Controllers\Api\SuperAdmin\SettingsController as SuperSettingsController;
+use App\Http\Controllers\Api\ClubController;
 
 /*
 |--------------------------------------------------------------------------
@@ -42,16 +47,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
 
     // Profile
+    Route::get('/users',   [ProfileController::class, 'listUsers']);
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::patch('/profile', [ProfileController::class, 'update']);
     Route::delete('/profile', [ProfileController::class, 'destroy']);
+    Route::post('/profile/select-club', [ProfileClubController::class, 'select']);
     Route::get('/profile/customize', [ProfileController::class, 'customize']);
     Route::post('/profile/customize', [ProfileController::class, 'updateCustomization']);
     Route::get('/profile/{userId}', [ProfileController::class, 'showUser']);
 
     // Collection
-    Route::get('/collection', [CollectionController::class, 'index']);
+    Route::get('/collection',             [CollectionController::class, 'index']);
+    Route::get('/collection/owned',       [CollectionController::class, 'ownedCards']);
     Route::get('/collection/card/{card}', [CollectionController::class, 'showCard']);
+    Route::get('/cards',                  [CollectionController::class, 'allCards']);
 
     // Challenges
     Route::get('/challenges', [ChallengeController::class, 'index']);
@@ -69,12 +78,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/packs/opening', [PackController::class, 'opening']);
     Route::post('/packs/claim', [PackController::class, 'claim']);
 
-    // Card Trades
-    Route::get('/trades', [TradeController::class, 'index']);
-    Route::get('/trades/my', [TradeController::class, 'myTrades']);
-    Route::post('/trades', [TradeController::class, 'store']);
+    // Échanges
+    Route::get('/trades',                 [TradeController::class, 'index']);
+    Route::get('/trades/marketplace',     [TradeController::class, 'marketplace']);
+    Route::get('/trades/history',         [TradeController::class, 'history']);
+    Route::post('/trades',                [TradeController::class, 'store']);
     Route::post('/trades/{trade}/accept', [TradeController::class, 'accept']);
-    Route::delete('/trades/{trade}', [TradeController::class, 'cancel']);
+    Route::post('/trades/{trade}/cancel', [TradeController::class, 'cancel']);
 
     // Money
     Route::get('/money', [MoneyController::class, 'index']);
@@ -103,7 +113,10 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
 
     // Users
     Route::get('/users', [UserController::class, 'index']);
+    Route::post('/users', [UserController::class, 'store']);
+    Route::post('/users/{user}', [UserController::class, 'update']);
     Route::post('/users/{user}/toggle-admin', [UserController::class, 'toggleAdmin']);
+    Route::post('/users/{user}/toggle-status', [UserController::class, 'toggleStatus']);
     Route::post('/users/{user}/add-coins', [UserController::class, 'addCoins']);
     Route::post('/users/{user}/add-packs', [UserController::class, 'addPacks']);
     Route::delete('/users/{user}', [UserController::class, 'destroy']);
@@ -139,7 +152,6 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/match-weeks/{matchWeek}', [MatchWeekAdminController::class, 'update']);
     Route::delete('/match-weeks/{matchWeek}', [MatchWeekAdminController::class, 'destroy']);
 
-
     // Challenges
     Route::get('/challenges', [ChallengeAdminController::class, 'index']);
     Route::post('/challenges', [ChallengeAdminController::class, 'store']);
@@ -147,4 +159,38 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/challenges/{challenge}', [ChallengeAdminController::class, 'update']);
     Route::delete('/challenges/{challenge}', [ChallengeAdminController::class, 'destroy']);
     Route::post('/challenges/{challenge}/toggle-active', [ChallengeAdminController::class, 'toggleActive']);
+
+    // Super Admin
+    Route::middleware('superadmin')->prefix('super-admin')->group(function () {
+        Route::get('/dashboard', [SuperDashboardController::class, 'index']);
+        Route::get('/clubs', [SuperClubController::class, 'index']);
+        Route::post('/clubs', [SuperClubController::class, 'store']);
+        Route::post('/clubs/{clubTeam}/toggle', [SuperClubController::class, 'toggle']);
+        Route::post('/clubs/{clubTeam}', [SuperClubController::class, 'update']);
+        Route::delete('/clubs/{clubTeam}', [SuperClubController::class, 'destroy']);
+        Route::get('/clubs/{clubTeam}/stats', [SuperClubController::class, 'stats']);
+        Route::get('/settings', [SuperSettingsController::class, 'show']);
+        Route::post('/settings', [SuperSettingsController::class, 'update']);
+    });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Super Admin Routes (direct prefix, without /admin)
+|--------------------------------------------------------------------------
+*/
+Route::middleware(['auth:sanctum', 'superadmin'])->prefix('super-admin')->group(function () {
+    Route::get('/dashboard', [SuperDashboardController::class, 'index']);
+    Route::get('/clubs', [SuperClubController::class, 'index']);
+    Route::post('/clubs', [SuperClubController::class, 'store']);
+    Route::get('/clubs/{clubTeam}/detail', [SuperClubController::class, 'detail']);
+    Route::post('/clubs/{clubTeam}/toggle', [SuperClubController::class, 'toggle']);
+    Route::post('/clubs/{clubTeam}', [SuperClubController::class, 'update']);
+    Route::delete('/clubs/{clubTeam}', [SuperClubController::class, 'destroy']);
+    Route::get('/clubs/{clubTeam}/stats', [SuperClubController::class, 'stats']);
+    Route::get('/settings', [SuperSettingsController::class, 'show']);
+    Route::post('/settings', [SuperSettingsController::class, 'update']);
+});
+
+// Public list of active clubs (for onboarding)
+Route::get('/clubs', [ClubController::class, 'index']);

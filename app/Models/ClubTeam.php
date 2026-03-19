@@ -14,12 +14,17 @@ class ClubTeam extends Model
         'name',
         'short_name',
         'is_active',
+        'logo',
+        'primary_color',
+        'theme_slug',
+        'is_main_club',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'is_main_club' => 'boolean',
         ];
     }
 

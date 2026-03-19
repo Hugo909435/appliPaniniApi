@@ -14,6 +14,10 @@ class PackController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Pack::query();
+        $user = $request->user();
+        if ($user && !$user->is_super_admin && $user->club_team_id) {
+            $query->where('club_team_id', $user->club_team_id);
+        }
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -31,7 +35,6 @@ class PackController extends Controller
             'money_price' => $pack->money_price,
             'card_count' => $pack->card_count,
             'is_active' => $pack->is_active,
-            'rarity_boosts' => $pack->rarity_boosts,
         ]);
 
         return response()->json(['packs' => $packs]);
@@ -39,6 +42,8 @@ class PackController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $admin = $request->user();
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255|unique:packs,slug',
@@ -47,12 +52,20 @@ class PackController extends Controller
             'money_price' => 'required|integer|min:0',
             'card_count' => 'required|integer|min:1|max:99',
             'is_active' => 'boolean',
+            'club_team_id' => 'nullable|integer|exists:club_teams,id',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
             'image_url' => 'nullable|string|max:255',
         ]);
 
         $validated['slug'] = $validated['slug'] ?? Str::slug($validated['name']);
         $validated['is_active'] = $request->boolean('is_active', true);
+
+        // Scope to admin's club unless super admin provides explicit club_team_id
+        if (!$admin->is_super_admin) {
+            $validated['club_team_id'] = $admin->club_team_id;
+        } elseif (empty($validated['club_team_id'])) {
+            unset($validated['club_team_id']);
+        }
 
         if ($request->hasFile('image')) {
             $validated['image'] = $this->storeImage($request->file('image'));
@@ -69,6 +82,11 @@ class PackController extends Controller
 
     public function update(Request $request, Pack $pack): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $pack->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255|unique:packs,slug,' . $pack->id,
@@ -101,8 +119,13 @@ class PackController extends Controller
         return response()->json(['message' => 'Pack mis à jour.', 'pack' => $pack]);
     }
 
-    public function destroy(Pack $pack): JsonResponse
+    public function destroy(Request $request, Pack $pack): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $pack->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         $this->deleteImageIfLocal($pack->image);
         $pack->delete();
 

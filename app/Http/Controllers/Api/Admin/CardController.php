@@ -23,6 +23,10 @@ class CardController extends Controller
             if ($rarity) $query->where('rarities_id', $rarity->id);
         }
         if ($request->filled('position_id')) $query->where('positions_id', $request->position_id);
+        $user = $request->user();
+        if ($user && !$user->is_super_admin && $user->club_team_id) {
+            $query->where('club_team_id', $user->club_team_id);
+        }
 
         $cards = $query->latest()->paginate(20)->through(fn($card) => [
             'id' => $card->id,
@@ -104,6 +108,11 @@ class CardController extends Controller
 
     public function update(Request $request, Card $card): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $card->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'club_team_id' => 'nullable|exists:club_teams,id',
@@ -133,8 +142,13 @@ class CardController extends Controller
         return response()->json(['message' => 'Carte mise à jour avec succès.', 'card' => $card]);
     }
 
-    public function destroy(Card $card): JsonResponse
+    public function destroy(Request $request, Card $card): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $card->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         if ($card->image && File::exists(public_path($card->image))) File::delete(public_path($card->image));
         $card->delete();
         return response()->json(['message' => 'Carte supprimée avec succès.']);

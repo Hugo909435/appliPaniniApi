@@ -11,17 +11,22 @@ class MatchWeekAdminController extends Controller
 {
     public function index(): JsonResponse
     {
-        $weeks = MatchWeek::withCount('matches')
-            ->orderByDesc('number')
-            ->get()
-            ->map(fn($w) => [
-                'id'          => $w->id,
-                'number'      => $w->number,
-                'start_date'  => $w->start_date->format('Y-m-d'),
-                'end_date'    => $w->end_date->format('Y-m-d'),
-                'label'       => $w->label,
-                'match_count' => $w->matches_count,
-            ]);
+        $user = request()->user();
+        $weeks = MatchWeek::withCount(['matches' => function ($q) use ($user) {
+            if ($user && !$user->is_super_admin && $user->club_team_id) {
+                $q->where('club_team_id', $user->club_team_id);
+            }
+        }])
+        ->orderByDesc('number')
+        ->get()
+        ->map(fn($w) => [
+            'id'          => $w->id,
+            'number'      => $w->number,
+            'start_date'  => $w->start_date->format('Y-m-d'),
+            'end_date'    => $w->end_date->format('Y-m-d'),
+            'label'       => $w->label,
+            'match_count' => $w->matches_count,
+        ]);
         return response()->json(['weeks' => $weeks]);
     }
 

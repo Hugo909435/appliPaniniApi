@@ -25,6 +25,9 @@ class User extends Authenticatable
         'level',
         'free_packs',
         'last_free_pack_claimed_at',
+        'club_team_id',
+        'is_super_admin',
+        'status',
     ];
 
     protected $hidden = [
@@ -42,7 +45,14 @@ class User extends Authenticatable
             'level' => 'integer',
             'free_packs' => 'integer',
             'last_free_pack_claimed_at' => 'datetime',
+            'is_super_admin' => 'boolean',
+            'status' => 'string',
         ];
+    }
+
+    public function clubTeam()
+    {
+        return $this->belongsTo(ClubTeam::class);
     }
 
     // ========== RELATIONS ==========

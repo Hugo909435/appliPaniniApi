@@ -9,27 +9,50 @@ class ClubTeamSeeder extends Seeder
 {
     public function run(): void
     {
-        $teams = [
-            ['name' => 'U9', 'short_name' => 'U9'],
-            ['name' => 'U10', 'short_name' => 'U10'],
-            ['name' => 'U11', 'short_name' => 'U11'],
-            ['name' => 'U12', 'short_name' => 'U12'],
-            ['name' => 'U13', 'short_name' => 'U13'],
-            ['name' => 'U14', 'short_name' => 'U14'],
-            ['name' => 'U15', 'short_name' => 'U15'],
-            ['name' => 'U16', 'short_name' => 'U16'],
-            ['name' => 'U17', 'short_name' => 'U17'],
-            ['name' => 'U18', 'short_name' => 'U18'],
-            ['name' => "Sénior", 'short_name' => 'Senior'],
+        $mainClubs = [
+            [
+                'name' => 'Club Alpha',
+                'short_name' => 'Alpha',
+                'logo' => 'https://placehold.co/200x200/FFD700/000000?text=Alpha',
+                'primary_color' => '#FFD700',
+            ],
+            [
+                'name' => 'Club Beta',
+                'short_name' => 'Beta',
+                'logo' => 'https://placehold.co/200x200/00BFFF/000000?text=Beta',
+                'primary_color' => '#00BFFF',
+            ],
         ];
 
-        foreach ($teams as $team) {
-            ClubTeam::firstOrCreate(
-                ['name' => $team['name']],
-                ['short_name' => $team['short_name'], 'is_active' => true]
+        $teamNames = ['U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','Senior'];
+
+        foreach ($mainClubs as $clubData) {
+            $main = ClubTeam::updateOrCreate(
+                ['name' => $clubData['name']],
+                [
+                    'short_name' => $clubData['short_name'],
+                    'logo' => $clubData['logo'],
+                    'primary_color' => $clubData['primary_color'],
+                    'theme_slug' => 'default',
+                    'is_active' => true,
+                    'is_main_club' => true,
+                    'parent_id' => null,
+                ]
             );
+
+            foreach ($teamNames as $team) {
+                ClubTeam::updateOrCreate(
+                    ['name' => "{$team} - {$main->short_name}", 'parent_id' => $main->id],
+                    [
+                        'short_name' => $team,
+                        'theme_slug' => 'default',
+                        'is_active' => true,
+                        'is_main_club' => false,
+                    ]
+                );
+            }
         }
 
-        $this->command->info('Équipes du club créées avec succès !');
+        $this->command->info('Clubs principaux et équipes U9 à Senior créés.');
     }
 }

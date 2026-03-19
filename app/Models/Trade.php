@@ -2,83 +2,61 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Trade extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
+        'proposer_id',
+        'receiver_id',
         'status',
-        'creator_id',
-        'offered_card_id',
-        'requested_card_id',
-        'responder_id',
+        'proposer_confirmed',
+        'receiver_confirmed',
+        'flagged',
+        'flag_reason',
+        'expires_at',
         'completed_at',
+        'club_team_id',
     ];
 
     protected $casts = [
-        'completed_at' => 'datetime',
+        'proposer_confirmed' => 'boolean',
+        'receiver_confirmed' => 'boolean',
+        'flagged'            => 'boolean',
+        'expires_at'         => 'datetime',
+        'completed_at'       => 'datetime',
+        'club_team_id'       => 'integer',
     ];
 
-    // Relations
-    public function creator()
+    public function proposer(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'creator_id');
+        return $this->belongsTo(User::class, 'proposer_id');
     }
 
-    public function responder()
+    public function receiver(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'responder_id');
+        return $this->belongsTo(User::class, 'receiver_id');
     }
 
-    public function offeredCard()
+    public function items(): HasMany
     {
-        return $this->belongsTo(Card::class, 'offered_card_id');
+        return $this->hasMany(TradeItem::class);
     }
 
-    public function requestedCard()
+    public function isPending(): bool   { return $this->status === 'pending'; }
+    public function isAccepted(): bool  { return $this->status === 'accepted'; }
+    public function isCompleted(): bool { return $this->status === 'completed'; }
+    public function isActive(): bool    { return in_array($this->status, ['pending', 'accepted']); }
+
+    public function scopeForUser($query, int $userId)
     {
-        return $this->belongsTo(Card::class, 'requested_card_id');
+        return $query->where('proposer_id', $userId)->orWhere('receiver_id', $userId);
     }
 
-    // Scopes
-    public function scopePending($query)
+    public function scopeActive($query)
     {
-        return $query->where('status', 'pending');
-    }
-
-    public function scopeForUser($query, $userId)
-    {
-        return $query->where(function($q) use ($userId) {
-            $q->where('creator_id', $userId)
-                ->orWhere('responder_id', $userId);
-        });
-    }
-
-    // Vérifier si l'utilisateur peut accepter l'échange
-    public function canAccept(User $user): bool
-    {
-        if ($this->status !== 'pending') {
-            return false;
-        }
-
-        // Vérifier que l'utilisateur possède la carte demandée
-        $hasRequestedCard = $user->cards()
-            ->where('card_id', $this->requested_card_id)
-            ->exists();
-
-        // Vérifier que ce n'est pas le créateur
-        return $hasRequestedCard && $this->creator_id !== $user->id;
-    }
-
-    // Vérifier si l'utilisateur possède déjà la carte offerte
-    public function userHasOfferedCard(User $user): bool
-    {
-        return $user->cards()
-            ->where('card_id', $this->offered_card_id)
-            ->exists();
+        return $query->whereIn('status', ['pending', 'accepted']);
     }
 }
-

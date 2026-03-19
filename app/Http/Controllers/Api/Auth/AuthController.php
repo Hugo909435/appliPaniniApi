@@ -33,6 +33,7 @@ class AuthController extends Controller
         ]);
 
         $token = $user->createToken('mobile')->plainTextToken;
+        $user->load('profile.favoritePlayerCard.rarity', 'clubTeam');
 
         return response()->json([
             'user' => $this->formatUser($user),
@@ -54,6 +55,7 @@ class AuthController extends Controller
         }
 
         $user = $request->user();
+        $user->load('profile.favoritePlayerCard.rarity', 'clubTeam');
         $token = $user->createToken('mobile')->plainTextToken;
 
         return response()->json([
@@ -72,7 +74,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
-        $user->load('profile.favoritePlayerCard.rarity');
+        $user->load('profile.favoritePlayerCard.rarity', 'clubTeam');
 
         return response()->json([
             'user' => $this->formatUser($user),
@@ -134,6 +136,14 @@ class AuthController extends Controller
             'free_packs' => $user->free_packs,
             'can_claim_free_pack' => $user->canClaimFreePack(),
             'is_admin' => $user->hasRole('admin'),
+            'is_super_admin' => (bool) $user->is_super_admin,
+            'club_team_id' => $user->club_team_id,
+            'club_team' => $user->clubTeam ? [
+                'id'         => $user->clubTeam->id,
+                'name'       => $user->clubTeam->name,
+                'logo'       => $user->clubTeam->logo,
+                'theme_slug' => $user->clubTeam->theme_slug ?? 'default',
+            ] : null,
             'created_at' => $user->created_at?->toDateTimeString(),
             'favorite_card' => $profile?->favoritePlayerCard ? [
                 'id'     => $profile->favoritePlayerCard->id,

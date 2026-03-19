@@ -17,6 +17,10 @@ class ClubMatchController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = ClubMatch::with('clubTeam')->orderBy('kickoff_at');
+        $user = $request->user();
+        if ($user && !$user->is_super_admin && $user->club_team_id) {
+            $query->where('club_team_id', $user->club_team_id);
+        }
 
         if ($request->filled('team_id')) {
             $query->where('club_team_id', $request->team_id);
@@ -75,6 +79,11 @@ class ClubMatchController extends Controller
 
     public function update(Request $request, ClubMatch $clubMatch): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $clubMatch->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         $validated = $request->validate([
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
@@ -100,8 +109,13 @@ class ClubMatchController extends Controller
         return response()->json(['message' => 'Match mis à jour.', 'match' => $this->mapMatch($clubMatch->fresh('clubTeam'))]);
     }
 
-    public function destroy(ClubMatch $clubMatch): JsonResponse
+    public function destroy(Request $request, ClubMatch $clubMatch): JsonResponse
     {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $clubMatch->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
         $clubMatch->delete();
         return response()->json(['message' => 'Match supprimé.']);
     }

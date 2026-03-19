@@ -94,6 +94,24 @@ class ProfileController extends Controller
         ]);
     }
 
+    /**
+     * Liste tous les utilisateurs (sauf soi-même) — pour sélectionner un destinataire d'échange.
+     * Supporte ?search=xxx pour filtrer par nom.
+     */
+    public function listUsers(Request $request): JsonResponse
+    {
+        $me      = $request->user();
+        $search  = $request->query('search');
+
+        $users = User::where('id', '!=', $me->id)
+            ->when($search, fn($q) => $q->where('name', 'like', "%{$search}%"))
+            ->orderBy('name')
+            ->select(['id', 'name'])
+            ->get();
+
+        return response()->json(['users' => $users]);
+    }
+
     public function customize(Request $request): JsonResponse
     {
         $user = $request->user();

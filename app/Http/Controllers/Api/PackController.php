@@ -13,41 +13,42 @@ class PackController extends Controller
 {
     public function __construct(protected PackService $packService) {}
 
-    /** Raretés par défaut (même valeurs que PackService) */
-    private const DEFAULT_RARITIES = [
-        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF', 'probability' => 38.0],
-        'uncommon'  => ['label' => 'Peu commun', 'color' => '#10B981', 'probability' => 28.0],
-        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6', 'probability' => 16.0],
-        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6', 'probability' =>  8.0],
-        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B', 'probability' =>  3.5],
-        'icone'     => ['label' => 'Icône',      'color' => '#EF4444', 'probability' =>  1.5],
+    private const RARITIES = [
+        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF', 'probability' => 50.0],
+        'uncommon'  => ['label' => 'Peu commun', 'color' => '#10B981', 'probability' => 30.0],
+        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6', 'probability' => 12.0],
+        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6', 'probability' =>  5.0],
+        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B', 'probability' =>  1.0],
+        'icone'     => ['label' => 'Icône',      'color' => '#EF4444', 'probability' =>  0.5],
     ];
 
-    private function buildRarities(Pack $pack): array
+    private function buildRarities(): array
     {
-        $boosts = $pack->rarity_boosts ?? [];
         $result = [];
 
-        foreach (self::DEFAULT_RARITIES as $slug => $meta) {
+        foreach (self::RARITIES as $slug => $meta) {
             $result[] = [
                 'rarity'      => $slug,
                 'label'       => $meta['label'],
                 'color'       => $meta['color'],
-                'probability' => $boosts[$slug] ?? $meta['probability'],
+                'probability' => $meta['probability'],
                 'per_pack'    => false,
             ];
         }
 
-        $hasSpecial = Card::whereHas('rarity', fn($q) => $q->where('slug', 'special'))->exists();
-        if ($hasSpecial) {
-            $result[] = [
-                'rarity'      => 'special',
-                'label'       => 'Spécial',
-                'color'       => '#22D3EE',
-                'probability' => $boosts['special'] ?? \App\Services\PackService::PAID_SPECIAL_CHANCE,
-                'per_pack'    => false,
-            ];
-        }
+        $baseSlugs    = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'icone'];
+        $specialSlugs = \DB::table('rarities')->whereNotIn('slug', $baseSlugs)->pluck('slug')->toArray();
+        $hasSpecial   = !empty($specialSlugs)
+            && Card::whereHas('rarity', fn($q) => $q->whereIn('slug', $specialSlugs))->exists();
+
+        $result[] = [
+            'rarity'      => 'special',
+            'label'       => 'Spécial',
+            'color'       => '#22D3EE',
+            'probability' => (float) \App\Services\PackService::RARITIES['special'],
+            'per_pack'    => false,
+            'available'   => $hasSpecial,
+        ];
 
         return $result;
     }
@@ -55,7 +56,9 @@ class PackController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
+        $clubId = $user->club_team_id;
         $packs = Pack::where('is_active', true)
+            ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
             ->orderBy('price', 'asc')
             ->get()
             ->map(fn($pack) => [
@@ -67,7 +70,7 @@ class PackController extends Controller
                 'price'       => $pack->price,
                 'money_price' => $pack->money_price,
                 'card_count'  => $pack->card_count,
-                'rarities'    => $this->buildRarities($pack),
+                'rarities'    => $this->buildRarities(),
             ]);
 
         return response()->json([
@@ -100,9 +103,19 @@ class PackController extends Controller
         if ($isFree) $count = 1;
 
         $packId = $validated['pack_id'] ?? null;
-        $pack = $packId
-            ? Pack::find($packId)
-            : Pack::where('is_active', true)->orderBy('price', 'asc')->first();
+        $clubId = $user->club_team_id;
+
+        if ($packId) {
+            $pack = Pack::find($packId);
+            if ($pack && $clubId && $pack->club_team_id && $pack->club_team_id !== $clubId) {
+                return response()->json(['message' => 'Ce pack n\'appartient pas à votre club.'], 403);
+            }
+        } else {
+            $pack = Pack::where('is_active', true)
+                ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
+                ->orderBy('price', 'asc')
+                ->first();
+        }
 
         if (!$pack) {
             return response()->json(['message' => 'Aucun pack disponible.'], 404);
@@ -158,7 +171,7 @@ class PackController extends Controller
                     'card_count' => $pack->card_count,
                 ],
                 'cards' => $formattedCards,
-                'has_prestige_card' => $formattedCards->contains(fn($c) => in_array($c['rarity'], ['epic', 'legendary', 'icone'])),
+                'has_prestige_card' => $formattedCards->contains(fn($c) => in_array($c['rarity'], ['epic', 'legendary', 'icone', 'buteur', 'passeur', 'joueur_debut'])),
                 'user' => [
                     'coins' => $user->coins,
                     'money' => $user->money,

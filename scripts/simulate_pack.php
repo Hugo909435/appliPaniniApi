@@ -68,13 +68,13 @@ if (!$pack) {
 }
 
 $defaults = [
-    'common'    => 38.0,
-    'uncommon'  => 28.0,
-    'rare'      => 16.0,
-    'epic'      => 8.0,
-    'legendary' => 3.5,
-    'icone'     => 1.5,
-    'special'   => 5.0,
+    'common'    => 50.0,
+    'uncommon'  => 30.0,
+    'rare'      => 12.0,
+    'epic'      =>  5.0,
+    'legendary' =>  1.0,
+    'icone'     =>  0.5,
+    'special'   =>  1.5,
 ];
 
 $boosts = [];
@@ -98,14 +98,27 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $availableCounts[$row['slug']] = (int) $row['total'];
 }
 
-// Special count (rarity = special)
+// Special count (rarities not in base set)
+$baseSlugs = array_keys($defaults);
+$placeholders = implode("','", $baseSlugs);
 $stmt = $pdo->query(
-    "SELECT COUNT(*) AS total
-     FROM cards c
-     JOIN rarities r ON r.id = c.rarities_id
-     WHERE r.slug = 'special'"
+    "SELECT DISTINCT r.slug
+     FROM rarities r
+     WHERE r.slug NOT IN ('{$placeholders}')"
 );
-$specialCount = (int) $stmt->fetchColumn();
+$specialSlugs = array_map(fn($row) => $row['slug'], $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+$specialCount = 0;
+if (!empty($specialSlugs)) {
+    $in = implode("','", $specialSlugs);
+    $stmt = $pdo->query(
+        "SELECT COUNT(*) AS total
+         FROM cards c
+         JOIN rarities r ON r.id = c.rarities_id
+         WHERE r.slug IN ('{$in}')"
+    );
+    $specialCount = (int) $stmt->fetchColumn();
+}
 
 $filtered = [];
 foreach ($rarities as $slug => $weight) {
@@ -139,7 +152,8 @@ echo "Available cards (non-exclusive):\n";
 foreach ($availableCounts as $slug => $cnt) {
     echo "  - {$slug}: {$cnt}\n";
 }
-echo "Special cards: {$specialCount}\n\n";
+$specialSlugsStr = !empty($specialSlugs) ? implode(', ', $specialSlugs) : 'none';
+echo "Special cards: {$specialCount} (slugs: {$specialSlugsStr})\n\n";
 
 echo "Weights used (filtered):\n";
 foreach ($filtered as $slug => $w) {

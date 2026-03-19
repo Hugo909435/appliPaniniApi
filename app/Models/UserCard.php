@@ -11,11 +11,13 @@ class UserCard extends Model
         'user_id',
         'card_id',
         'quantity',
+        'is_locked',
         'obtained_at',
     ];
 
     protected $casts = [
-        'quantity' => 'integer',
+        'quantity'    => 'integer',
+        'is_locked'   => 'boolean',
         'obtained_at' => 'datetime',
     ];
 

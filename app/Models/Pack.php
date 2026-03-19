@@ -15,18 +15,18 @@ class Pack extends Model
         'description',
         'image',
         'price',
-        'money_price', // ✅ AJOUTÉ
+        'money_price',
         'card_count',
         'is_active',
-        'rarity_boosts',
+        'club_team_id',
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
-        'rarity_boosts' => 'array',
-        'price' => 'integer',
-        'money_price' => 'integer', // ✅ AJOUTÉ
-        'card_count' => 'integer',
+        'is_active'   => 'boolean',
+        'price'       => 'integer',
+        'money_price' => 'integer',
+        'card_count'  => 'integer',
+        'club_team_id'=> 'integer',
     ];
 
     protected $appends = ['image_url'];

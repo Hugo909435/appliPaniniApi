@@ -75,11 +75,14 @@ class PredictionController extends Controller
         $weekStart = $matchWeek->start_date->startOfDay();
         $weekEnd   = $matchWeek->end_date->endOfDay();
 
+        $clubId = $user->club_team_id;
+
         $matches = ClubMatch::with([
             'clubTeam',
             'matchWeek',
             'predictions' => fn($q) => $q->where('user_id', $user->id),
         ])
+            ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
             ->where(function ($q) use ($matchWeek, $weekStart, $weekEnd) {
                 $q->where('match_week_id', $matchWeek->id)
                   ->orWhere(function ($q) use ($weekStart, $weekEnd) {
@@ -250,11 +253,13 @@ class PredictionController extends Controller
     // ─── results ─────────────────────────────────────────────────────────────────
     public function results(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $user   = $request->user();
+        $clubId = $user->club_team_id;
 
         // Toutes les prédictions avec les matchs
         $predictions = MatchPrediction::where('user_id', $user->id)
             ->with('match.matchWeek', 'match.clubTeam')
+            ->when($clubId, fn($q) => $q->whereHas('match', fn($mq) => $mq->where('club_team_id', $clubId)))
             ->get();
 
         if ($predictions->isEmpty()) {
@@ -469,11 +474,13 @@ class PredictionController extends Controller
     // ─── history ─────────────────────────────────────────────────────────────────
     public function history(Request $request): JsonResponse
     {
-        $user  = $request->user();
-        $query = ClubMatch::with([
+        $user   = $request->user();
+        $clubId = $user->club_team_id;
+        $query  = ClubMatch::with([
             'clubTeam',
             'predictions' => fn($q) => $q->where('user_id', $user->id),
         ])
+            ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
             ->whereNotNull('result_outcome')
             ->orderByDesc('kickoff_at');
 
@@ -516,6 +523,8 @@ class PredictionController extends Controller
     // ─── leaderboard ─────────────────────────────────────────────────────────────
     public function leaderboard(Request $request): JsonResponse
     {
+        $user      = $request->user();
+        $clubId    = $user->club_team_id;
         $scope     = $request->input('scope', 'week');
         $weekStart = null;
         $weekEnd   = null;
@@ -529,7 +538,8 @@ class PredictionController extends Controller
 
         $allMatchesQuery = ClubMatch::with('matchWeek')
             ->whereNotNull('result_outcome')
-            ->where('is_cancelled', false);
+            ->where('is_cancelled', false)
+            ->when($clubId, fn($q) => $q->where('club_team_id', $clubId));
         if ($weekEnd) $allMatchesQuery->where('kickoff_at', '<=', $weekEnd);
         $allMatches  = $allMatchesQuery->get();
         $allMatchIds = $allMatches->pluck('id')->all();
@@ -623,7 +633,11 @@ class PredictionController extends Controller
         }
 
         $userIds     = array_unique(array_merge(array_keys($pointsByUser), array_keys($totalByUser)));
-        $users       = \App\Models\User::whereIn('id', $userIds)->get(['id', 'name'])->keyBy('id');
+        $usersQuery  = \App\Models\User::whereIn('id', $userIds);
+        if ($clubId) {
+            $usersQuery->where('club_team_id', $clubId);
+        }
+        $users       = $usersQuery->get(['id', 'name'])->keyBy('id');
 
         $rank        = 1;
         $leaderboard = collect($userIds)->map(function ($uid) use ($users, $pointsByUser, $correctByUser, $totalByUser) {
