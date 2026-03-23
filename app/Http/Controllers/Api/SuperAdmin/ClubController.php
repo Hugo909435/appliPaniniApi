@@ -11,7 +11,9 @@ use App\Models\Trade;
 use App\Models\Position;
 use App\Models\Rarity;
 use App\Models\User;
+use App\Models\UserProfile;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ClubController extends Controller
@@ -32,7 +34,7 @@ class ClubController extends Controller
             'logo'         => ['nullable', 'string'],
             'logo_file'    => ['nullable', 'image', 'max:2048'],
             'primary_color'=> ['nullable', 'string', 'max:9'],
-            'theme_slug'   => ['nullable', 'string', 'in:default,red,orange,blue_yellow,blue,green_red'],
+            'theme_slug'   => ['nullable', 'string', 'in:default,red,orange,blue_yellow,blue,green_red,violet,mono,red_black,red_white,blue_white,blue_red,green_white,green_yellow,orange_black,purple_yellow,teal_orange'],
         ]);
 
         $club = new ClubTeam();
@@ -77,7 +79,7 @@ class ClubController extends Controller
         $data = $request->validate([
             'name'          => ['nullable', 'string', 'max:255', 'unique:club_teams,name,' . $clubTeam->id],
             'short_name'    => ['nullable', 'string', 'max:255'],
-            'theme_slug'    => ['nullable', 'string', 'in:default,red,orange,blue_yellow,blue,green_red'],
+            'theme_slug'    => ['nullable', 'string', 'in:default,red,orange,blue_yellow,blue,green_red,violet,mono,red_black,red_white,blue_white,blue_red,green_white,green_yellow,orange_black,purple_yellow,teal_orange'],
             'logo_file'     => ['nullable', 'image', 'max:2048'],
             'is_active'     => ['nullable', 'boolean'],
         ]);
@@ -199,7 +201,8 @@ class ClubController extends Controller
                 'price' => $p->price,
                 'money_price' => $p->money_price,
                 'card_count' => $p->card_count,
-                'is_active' => (bool) $p->is_active,
+                'is_active'     => (bool) $p->is_active,
+                'rarity_boosts' => $p->rarity_boosts,
             ]);
 
         return response()->json([
@@ -211,6 +214,149 @@ class ClubController extends Controller
             'packs' => $packs,
             'rarities' => Rarity::orderBy('drop_rate', 'desc')->get(['id', 'name', 'slug', 'color']),
             'positions' => Position::orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
+    public function clubDashboard(ClubTeam $clubTeam)
+    {
+        $clubId = $clubTeam->id;
+        $clubIds = ClubTeam::where('id', $clubId)
+            ->orWhere('parent_id', $clubId)
+            ->pluck('id');
+
+        // ── Trades ────────────────────────────────────────────────────────────
+        $tradeSummary = Trade::whereIn('club_team_id', $clubIds)
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN status IN ('pending','accepted') THEN 1 ELSE 0 END) as ongoing,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
+            ")
+            ->first();
+
+        // ── Pronostics ────────────────────────────────────────────────────────
+        $predStats = \DB::table('match_predictions')
+            ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
+            ->where('club_matches.club_team_id', $clubId)
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN match_predictions.rewarded_at IS NULL THEN 1 ELSE 0 END) as ongoing,
+                SUM(CASE WHEN match_predictions.rewarded_at IS NOT NULL THEN 1 ELSE 0 END) as rewarded
+            ")
+            ->first();
+
+        // ── Collection completion par utilisateur ─────────────────────────────
+        $totalCards = Card::whereIn('club_team_id', $clubIds)->count();
+
+        $users = User::where('is_super_admin', false)
+            ->where(function ($q) use ($clubIds, $clubTeam) {
+                $q->whereIn('club_team_id', $clubIds);
+                if ($clubTeam->is_main_club) {
+                    $q->orWhereNull('club_team_id');
+                }
+            })
+            ->select('id', 'name', 'email')
+            ->get();
+
+        $userIds = $users->pluck('id');
+
+        $statsPerUser = DB::table('user_cards')
+            ->join('cards', 'cards.id', '=', 'user_cards.card_id')
+            ->whereIn('cards.club_team_id', $clubIds)
+            ->whereIn('user_cards.user_id', $userIds)
+            ->groupBy('user_cards.user_id')
+            ->selectRaw('user_cards.user_id, COUNT(DISTINCT user_cards.card_id) as unique_owned, SUM(user_cards.quantity) as total_owned')
+            ->get()
+            ->keyBy('user_id');
+
+        // Raretés possédées par utilisateur
+        $rarityPerUser = DB::table('user_cards')
+            ->join('cards', 'cards.id', '=', 'user_cards.card_id')
+            ->join('rarities', 'rarities.id', '=', 'cards.rarities_id')
+            ->whereIn('cards.club_team_id', $clubIds)
+            ->whereIn('user_cards.user_id', $userIds)
+            ->groupBy('user_cards.user_id', 'rarities.slug')
+            ->selectRaw('user_cards.user_id, rarities.slug as rarity, SUM(user_cards.quantity) as qty')
+            ->get()
+            ->groupBy('user_id');
+
+        // Packs ouverts par utilisateur
+        $packsOpened = UserProfile::whereIn('user_id', $userIds)
+            ->pluck('total_packs_opened', 'user_id');
+
+        // Trades par utilisateur (créés, terminés, annulés, actifs)
+        $trades = Trade::whereIn('club_team_id', $clubIds)
+            ->where(function ($q) use ($userIds) {
+                $q->whereIn('proposer_id', $userIds)->orWhereIn('receiver_id', $userIds);
+            })
+            ->select('proposer_id', 'receiver_id', 'status')
+            ->get();
+        $userTradeStats = [];
+        foreach ($userIds as $uid) {
+            $userTradeStats[$uid] = ['created' => 0, 'completed' => 0, 'cancelled' => 0, 'active' => 0];
+        }
+        foreach ($trades as $t) {
+            if (isset($userTradeStats[$t->proposer_id])) {
+                $userTradeStats[$t->proposer_id]['created']++;
+            }
+            $participants = [$t->proposer_id, $t->receiver_id];
+            foreach ($participants as $uid) {
+                if (!isset($userTradeStats[$uid])) continue;
+                if ($t->status === 'completed')      $userTradeStats[$uid]['completed']++;
+                else if ($t->status === 'cancelled') $userTradeStats[$uid]['cancelled']++;
+                else                                 $userTradeStats[$uid]['active']++;
+            }
+        }
+
+        // Pronostics par utilisateur (success = rewarded_at non nul)
+        $predictions = DB::table('match_predictions')
+            ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
+            ->whereIn('club_matches.club_team_id', $clubIds)
+            ->whereIn('match_predictions.user_id', $userIds)
+            ->select('match_predictions.user_id', 'match_predictions.rewarded_at')
+            ->get();
+        $predictionStats = [];
+        foreach ($userIds as $uid) {
+            $predictionStats[$uid] = ['total' => 0, 'success' => 0, 'failed' => 0];
+        }
+        foreach ($predictions as $p) {
+            $predictionStats[$p->user_id]['total']++;
+            if ($p->rewarded_at) $predictionStats[$p->user_id]['success']++;
+            else                 $predictionStats[$p->user_id]['failed']++;
+        }
+
+        $collection = $users->map(fn($u) => [
+            'id'           => $u->id,
+            'name'         => $u->name,
+            'email'        => $u->email,
+            'unique_owned' => (int) ($statsPerUser[$u->id]->unique_owned ?? 0),
+            'total_owned'  => (int) ($statsPerUser[$u->id]->total_owned ?? 0),
+            'total'        => $totalCards,
+            'percent'      => $totalCards > 0
+                ? round(($statsPerUser[$u->id]->unique_owned ?? 0) / $totalCards * 100, 1)
+                : 0,
+            'packs_opened' => (int) ($packsOpened[$u->id] ?? 0),
+            'trades'       => $userTradeStats[$u->id] ?? ['created' => 0, 'completed' => 0, 'cancelled' => 0, 'active' => 0],
+            'predictions'  => $predictionStats[$u->id] ?? ['total' => 0, 'success' => 0, 'failed' => 0],
+            'rarities'     => ($rarityPerUser[$u->id] ?? collect())->mapWithKeys(fn($r) => [$r->rarity => (int) $r->qty]),
+        ])->sortByDesc('percent')->values();
+
+        return response()->json([
+            'trades' => [
+                'total'     => (int) $tradeSummary->total,
+                'ongoing'   => (int) $tradeSummary->ongoing,
+                'completed' => (int) $tradeSummary->completed,
+                'cancelled' => (int) $tradeSummary->cancelled,
+            ],
+            'predictions' => [
+                'total'    => (int) $predStats->total,
+                'ongoing'  => (int) $predStats->ongoing,
+                'rewarded' => (int) $predStats->rewarded,
+            ],
+            'collection' => [
+                'total_cards' => $totalCards,
+                'users'       => $collection,
+            ],
         ]);
     }
 

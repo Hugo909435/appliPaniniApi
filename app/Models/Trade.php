@@ -19,6 +19,8 @@ class Trade extends Model
         'expires_at',
         'completed_at',
         'club_team_id',
+        'offered_card_id',
+        'requested_card_id',
     ];
 
     protected $casts = [
@@ -40,6 +42,16 @@ class Trade extends Model
         return $this->belongsTo(User::class, 'receiver_id');
     }
 
+    public function offeredCard(): BelongsTo
+    {
+        return $this->belongsTo(Card::class, 'offered_card_id');
+    }
+
+    public function requestedCard(): BelongsTo
+    {
+        return $this->belongsTo(Card::class, 'requested_card_id');
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(TradeItem::class);
@@ -52,7 +64,9 @@ class Trade extends Model
 
     public function scopeForUser($query, int $userId)
     {
-        return $query->where('proposer_id', $userId)->orWhere('receiver_id', $userId);
+        return $query->where(function ($q) use ($userId) {
+            $q->where('proposer_id', $userId)->orWhere('receiver_id', $userId);
+        });
     }
 
     public function scopeActive($query)

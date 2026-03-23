@@ -133,6 +133,7 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/packs', [AdminPackController::class, 'store']);
     Route::post('/packs/{pack}', [AdminPackController::class, 'update']);
     Route::delete('/packs/{pack}', [AdminPackController::class, 'destroy']);
+    Route::patch('/packs/{pack}/probabilities', [AdminPackController::class, 'updateProbabilities']);
 
     // Club Teams
     Route::get('/club-teams', [ClubTeamController::class, 'index']);
@@ -188,6 +189,7 @@ Route::middleware(['auth:sanctum', 'superadmin'])->prefix('super-admin')->group(
     Route::post('/clubs/{clubTeam}', [SuperClubController::class, 'update']);
     Route::delete('/clubs/{clubTeam}', [SuperClubController::class, 'destroy']);
     Route::get('/clubs/{clubTeam}/stats', [SuperClubController::class, 'stats']);
+    Route::get('/clubs/{clubTeam}/dashboard', [SuperClubController::class, 'clubDashboard']);
     Route::get('/settings', [SuperSettingsController::class, 'show']);
     Route::post('/settings', [SuperSettingsController::class, 'update']);
 });

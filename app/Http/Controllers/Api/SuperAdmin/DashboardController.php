@@ -9,6 +9,7 @@ use App\Models\MatchPrediction;
 use App\Models\Pack;
 use App\Models\Trade;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
@@ -31,15 +32,22 @@ class DashboardController extends Controller
                     }
                 })->count();
 
+                $tradesCount = Trade::whereIn('club_team_id', $clubIds)->count();
+
+                $predictionsCount = DB::table('match_predictions')
+                    ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
+                    ->whereIn('club_matches.club_team_id', $clubIds)
+                    ->count();
+
                 return [
                     'id' => $club->id,
                     'name' => $club->name,
                     'is_active' => (bool) ($club->is_active ?? true),
                     'is_main_club' => (bool) ($club->is_main_club ?? false),
                     'cards' => Card::where('club_team_id', $club->id)->count(),
-                    'packs' => 1, // un pack par club principal (seed)
-                    'trades' => 0,
-                    'predictions' => 0,
+                    'packs' => Pack::where('club_team_id', $club->id)->count(),
+                    'trades' => $tradesCount,
+                    'predictions' => $predictionsCount,
                     'users' => $usersCount,
                 ];
             });

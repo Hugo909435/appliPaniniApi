@@ -50,7 +50,7 @@ class PackService
             }
         }
 
-        $cards = $this->generatePackCards($packSize, $clubTeamId);
+        $cards = $this->generatePackCards($packSize, $clubTeamId, $pack?->rarity_boosts);
 
         foreach ($cards as $card) {
             $user->addCard($card);
@@ -72,9 +72,11 @@ class PackService
         ];
     }
 
-    protected function generatePackCards(int $packSize, ?int $clubTeamId = null): Collection
+    protected function generatePackCards(int $packSize, ?int $clubTeamId = null, ?array $rarityBoosts = null): Collection
     {
         $cards = collect();
+
+        $baseRarities = $rarityBoosts ?? self::RARITIES;
 
         $baseSlugs    = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'icone'];
         $specialSlugs = \DB::table('rarities')
@@ -103,7 +105,7 @@ class PackService
         $specialCount = empty($specialSlugs) ? 0 : $specialQuery->count();
 
         $filteredRarities = array_filter(
-            self::RARITIES,
+            $baseRarities,
             fn($w, $slug) => $w > 0 && (
                 ($slug === 'special' && $specialCount > 0) || array_key_exists($slug, $availableCounts)
             ),

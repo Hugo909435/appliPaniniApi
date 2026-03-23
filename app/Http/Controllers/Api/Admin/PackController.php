@@ -26,15 +26,16 @@ class PackController extends Controller
         }
 
         $packs = $query->latest()->paginate(20)->through(fn($pack) => [
-            'id' => $pack->id,
-            'name' => $pack->name,
-            'slug' => $pack->slug,
-            'description' => $pack->description,
-            'image' => $pack->image_url,
-            'price' => $pack->price,
-            'money_price' => $pack->money_price,
-            'card_count' => $pack->card_count,
-            'is_active' => $pack->is_active,
+            'id'            => $pack->id,
+            'name'          => $pack->name,
+            'slug'          => $pack->slug,
+            'description'   => $pack->description,
+            'image'         => $pack->image_url,
+            'price'         => $pack->price,
+            'money_price'   => $pack->money_price,
+            'card_count'    => $pack->card_count,
+            'is_active'     => $pack->is_active,
+            'rarity_boosts' => $pack->rarity_boosts,
         ]);
 
         return response()->json(['packs' => $packs]);
@@ -130,6 +131,28 @@ class PackController extends Controller
         $pack->delete();
 
         return response()->json(['message' => 'Pack supprimé.']);
+    }
+
+    public function updateProbabilities(Request $request, Pack $pack): JsonResponse
+    {
+        $admin = $request->user();
+        if (!$admin->is_super_admin && $admin->club_team_id && $pack->club_team_id !== $admin->club_team_id) {
+            return response()->json(['message' => 'Accès refusé.'], 403);
+        }
+
+        $validated = $request->validate([
+            'rarity_boosts'   => 'required|array',
+            'rarity_boosts.*' => 'required|numeric|min:0|max:100',
+        ]);
+
+        $total = array_sum($validated['rarity_boosts']);
+        if (abs($total - 100) > 0.01) {
+            return response()->json(['message' => 'La somme des probabilités doit être égale à 100%.'], 422);
+        }
+
+        $pack->update(['rarity_boosts' => $validated['rarity_boosts']]);
+
+        return response()->json(['message' => 'Probabilités mises à jour.', 'pack' => $pack]);
     }
 
     private function storeImage($file): string

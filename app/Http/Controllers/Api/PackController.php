@@ -22,7 +22,7 @@ class PackController extends Controller
         'icone'     => ['label' => 'Icône',      'color' => '#EF4444', 'probability' =>  0.5],
     ];
 
-    private function buildRarities(): array
+    private function buildRarities(?array $customBoosts = null): array
     {
         $result = [];
 
@@ -31,8 +31,10 @@ class PackController extends Controller
                 'rarity'      => $slug,
                 'label'       => $meta['label'],
                 'color'       => $meta['color'],
-                'probability' => $meta['probability'],
-                'per_pack'    => false,
+                'probability' => $customBoosts !== null
+                    ? (float) ($customBoosts[$slug] ?? 0)
+                    : $meta['probability'],
+                'per_pack'    => $customBoosts !== null,
             ];
         }
 
@@ -45,8 +47,10 @@ class PackController extends Controller
             'rarity'      => 'special',
             'label'       => 'Spécial',
             'color'       => '#22D3EE',
-            'probability' => (float) \App\Services\PackService::RARITIES['special'],
-            'per_pack'    => false,
+            'probability' => $customBoosts !== null
+                ? (float) ($customBoosts['special'] ?? 0)
+                : (float) \App\Services\PackService::RARITIES['special'],
+            'per_pack'    => $customBoosts !== null,
             'available'   => $hasSpecial,
         ];
 
@@ -70,7 +74,7 @@ class PackController extends Controller
                 'price'       => $pack->price,
                 'money_price' => $pack->money_price,
                 'card_count'  => $pack->card_count,
-                'rarities'    => $this->buildRarities(),
+                'rarities'    => $this->buildRarities($pack->rarity_boosts),
             ]);
 
         return response()->json([
