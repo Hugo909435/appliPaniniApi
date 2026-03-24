@@ -20,7 +20,6 @@ class PackSeeder extends Seeder
                 'slug' => Str::slug("pack-{$club->short_name}"),
                 'description' => "Pack officiel de {$club->name}",
                 'price' => 50,
-                'money_price' => 5,
                 'card_count' => 5,
                 'image' => null,
                 'is_active' => true,

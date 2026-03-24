@@ -25,6 +25,11 @@ class TradeService
 
             $this->lockCard($proposer, $offeredCardId);
 
+            // Deuxième vérification après acquisition du lock de carte :
+            // réduit la fenêtre TOCTOU sur les requêtes concurrentes.
+            $this->checkActiveLimit($proposer);
+            $this->checkDailyLimit($proposer);
+
             $trade = Trade::create([
                 'proposer_id'      => $proposer->id,
                 'receiver_id'      => null,

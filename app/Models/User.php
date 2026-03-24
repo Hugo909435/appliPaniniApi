@@ -7,12 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Cashier\Billable;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, Billable;
+    use HasApiTokens, HasFactory, Notifiable;
 
     const MAX_FREE_PACKS = 1;
 
@@ -26,8 +25,6 @@ class User extends Authenticatable
         'free_packs',
         'last_free_pack_claimed_at',
         'club_team_id',
-        'is_super_admin',
-        'status',
     ];
 
     protected $hidden = [
@@ -93,6 +90,7 @@ class User extends Authenticatable
 
     public function assignRole(string $slug): void
     {
+        // Avoid mass-assigning privileged fields: roles must be set explicitly.
         $role = Role::where('slug', $slug)->first();
         if ($role && !$this->roles->contains($role->id)) {
             $this->roles()->attach($role->id);
@@ -168,12 +166,6 @@ class User extends Authenticatable
         $this->decrement('coins', $amount);
         return true;
     }
-
-    public function moneyTransactions()
-    {
-        return $this->hasMany(MoneyTransaction::class);
-    }
-
 
     // ========== CARDS ==========
 

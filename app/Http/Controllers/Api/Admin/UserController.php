@@ -142,7 +142,7 @@ class UserController extends Controller
         if (!$this->authorizeClub($request, $user)) {
             return response()->json(['message' => 'Accès refusé.'], 403);
         }
-        $validated = $request->validate(['amount' => 'required|integer|min:1']);
+        $validated = $request->validate(['amount' => 'required|integer|min:1|max:100000']);
         $user->addCoins($validated['amount']);
         return response()->json(['message' => "Coins ajoutés.", 'coins' => $user->fresh()->coins]);
     }
@@ -152,7 +152,7 @@ class UserController extends Controller
         if (!$this->authorizeClub($request, $user)) {
             return response()->json(['message' => 'Accès refusé.'], 403);
         }
-        $validated = $request->validate(['amount' => 'required|integer|min:1']);
+        $validated = $request->validate(['amount' => 'required|integer|min:1|max:100']);
         $user->increment('free_packs', $validated['amount']);
         return response()->json(['message' => "Packs ajoutés.", 'free_packs' => $user->fresh()->free_packs]);
     }

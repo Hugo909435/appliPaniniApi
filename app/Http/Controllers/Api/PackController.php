@@ -8,40 +8,38 @@ use App\Models\Card;
 use App\Services\PackService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PackController extends Controller
 {
     public function __construct(protected PackService $packService) {}
 
-    private const RARITIES = [
-        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF', 'probability' => 50.0],
-        'uncommon'  => ['label' => 'Peu commun', 'color' => '#10B981', 'probability' => 30.0],
-        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6', 'probability' => 12.0],
-        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6', 'probability' =>  5.0],
-        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B', 'probability' =>  1.0],
-        'icone'     => ['label' => 'Icône',      'color' => '#EF4444', 'probability' =>  0.5],
+    // Labels et couleurs d'affichage (les probabilités viennent de PackService::RARITIES)
+    private const RARITY_META = [
+        'common'    => ['label' => 'Commun',     'color' => '#9CA3AF'],
+        'uncommon'  => ['label' => 'Peu commun', 'color' => '#10B981'],
+        'rare'      => ['label' => 'Rare',       'color' => '#3B82F6'],
+        'epic'      => ['label' => 'Épique',     'color' => '#8B5CF6'],
+        'legendary' => ['label' => 'Légendaire', 'color' => '#F59E0B'],
+        'icone'     => ['label' => 'Icône',      'color' => '#EF4444'],
     ];
 
-    private function buildRarities(?array $customBoosts = null): array
+    private function buildRarities(?array $customBoosts = null, array $specialSlugs = [], bool $hasSpecial = false): array
     {
         $result = [];
+        $baseProbabilities = PackService::RARITIES;
 
-        foreach (self::RARITIES as $slug => $meta) {
+        foreach (self::RARITY_META as $slug => $meta) {
             $result[] = [
                 'rarity'      => $slug,
                 'label'       => $meta['label'],
                 'color'       => $meta['color'],
                 'probability' => $customBoosts !== null
                     ? (float) ($customBoosts[$slug] ?? 0)
-                    : $meta['probability'],
+                    : (float) ($baseProbabilities[$slug] ?? 0),
                 'per_pack'    => $customBoosts !== null,
             ];
         }
-
-        $baseSlugs    = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'icone'];
-        $specialSlugs = \DB::table('rarities')->whereNotIn('slug', $baseSlugs)->pluck('slug')->toArray();
-        $hasSpecial   = !empty($specialSlugs)
-            && Card::whereHas('rarity', fn($q) => $q->whereIn('slug', $specialSlugs))->exists();
 
         $result[] = [
             'rarity'      => 'special',
@@ -61,6 +59,12 @@ class PackController extends Controller
     {
         $user = $request->user();
         $clubId = $user->club_team_id;
+        // Calculé une fois pour tous les packs
+        $baseSlugs    = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'icone'];
+        $specialSlugs = \DB::table('rarities')->whereNotIn('slug', $baseSlugs)->pluck('slug')->toArray();
+        $hasSpecial   = !empty($specialSlugs)
+            && Card::whereHas('rarity', fn($q) => $q->whereIn('slug', $specialSlugs))->exists();
+
         $packs = Pack::where('is_active', true)
             ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
             ->orderBy('price', 'asc')
@@ -72,9 +76,8 @@ class PackController extends Controller
                 'description' => $pack->description,
                 'image'       => $pack->image_url,
                 'price'       => $pack->price,
-                'money_price' => $pack->money_price,
                 'card_count'  => $pack->card_count,
-                'rarities'    => $this->buildRarities($pack->rarity_boosts),
+                'rarities'    => $this->buildRarities($pack->rarity_boosts, $specialSlugs, $hasSpecial),
             ]);
 
         return response()->json([
@@ -94,13 +97,11 @@ class PackController extends Controller
         $validated = $request->validate([
             'pack_id'   => 'nullable|integer',
             'free'      => 'boolean',
-            'use_money' => 'boolean',
             'count'     => 'integer|min:1|max:10',
         ]);
 
         $user     = $request->user();
         $isFree   = $request->boolean('free');
-        $useMoney = $request->boolean('use_money');
         $count    = (int) ($validated['count'] ?? 1);
 
         // Les packs gratuits ne sont pas multipliables
@@ -129,24 +130,32 @@ class PackController extends Controller
         if ($isFree && !$user->hasFreePacks()) {
             return response()->json(['message' => "Vous n'avez pas de pack gratuit disponible."], 400);
         }
-        if (!$isFree && $useMoney && $user->money < $pack->money_price * $count) {
-            return response()->json(['message' => "Pas assez de money pour {$count} pack(s)."], 400);
-        }
-        if (!$isFree && !$useMoney && $user->coins < $pack->price * $count) {
+        if (!$isFree && $user->coins < $pack->price * $count) {
             return response()->json(['message' => "Pas assez de pièces pour {$count} pack(s)."], 400);
         }
 
         try {
-            $allCards = collect();
-            for ($i = 0; $i < $count; $i++) {
-                $result = $this->packService->openPack($user, $isFree && $i === 0, $pack->id, $useMoney);
-                $allCards = $allCards->merge($result['cards']);
-                $user     = $result['user'];
-            }
+            // Cartes possédées AVANT ouverture pour calculer is_new correctement
+            // (évite les faux négatifs quand la même carte tombe 2× dans 10 packs)
+            $ownedBeforeIds = $user->cards()->pluck('card_id')->flip()->all();
+
+            [$allCards, $user] = DB::transaction(function () use ($user, $count, $isFree, $pack) {
+                $allCards = collect();
+                for ($i = 0; $i < $count; $i++) {
+                    $result = $this->packService->openPack($user, $isFree && $i === 0, $pack->id);
+                    $allCards = $allCards->merge($result['cards']);
+                    $user     = $result['user'];
+                }
+                return [$allCards, $user];
+            });
             $cards = $allCards;
 
-            $formattedCards = $cards->map(function ($card) use ($user) {
-                $userCard = $user->cards()->where('card_id', $card->id)->first();
+            // Charge toutes les quantités en une seule requête
+            $cardIds = $cards->pluck('id')->all();
+            $userCardsMap = $user->cards()->whereIn('card_id', $cardIds)->get()->keyBy(fn($c) => $c->id);
+
+            $formattedCards = $cards->map(function ($card) use ($user, $ownedBeforeIds, $userCardsMap) {
+                $userCard = $userCardsMap->get($card->id);
                 return [
                     'id' => $card->id,
                     'name' => $card->name,
@@ -161,7 +170,7 @@ class PackController extends Controller
                     'stamina' => $card->stamina,
                     'overall' => $card->overall,
                     'number' => $card->number,
-                    'is_new' => $userCard && $userCard->pivot->quantity === 1,
+                    'is_new' => !array_key_exists($card->id, $ownedBeforeIds),
                     'quantity' => $userCard ? $userCard->pivot->quantity : 1,
                 ];
             });

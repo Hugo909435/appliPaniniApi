@@ -124,7 +124,7 @@ class PredictionController extends Controller
                     'away_score'     => $match->away_score,
                     'result_outcome' => $match->result_outcome,
                     'is_cancelled'   => $match->is_cancelled,
-                    'can_predict'    => !$match->is_cancelled && $withinWindow && ($match->kickoff_at?->isFuture() ?? false),
+                    'can_predict'    => !$match->is_cancelled && $withinWindow && ($match->kickoff_at?->isFuture() ?? false) && $prediction === null,
                     'user_prediction'=> $prediction?->predicted_outcome,
                     'user_predicted_home_score' => $prediction?->predicted_home_score,
                     'user_predicted_away_score' => $prediction?->predicted_away_score,
@@ -183,15 +183,21 @@ class PredictionController extends Controller
 
         $isDouble = $validated['is_double'] ?? false;
 
-        $prediction = MatchPrediction::updateOrCreate(
-            ['club_match_id' => $match->id, 'user_id' => $user->id],
-            [
-                'predicted_outcome'    => $predictedOutcome,
-                'predicted_home_score' => $validated['predicted_home_score'],
-                'predicted_away_score' => $validated['predicted_away_score'],
-                'is_double'            => $isDouble,
-            ]
-        );
+        $existing = MatchPrediction::where('club_match_id', $match->id)
+            ->where('user_id', $user->id)
+            ->exists();
+        if ($existing) {
+            return response()->json(['message' => "Tu as déjà pronostiqué ce match, impossible de modifier."], 422);
+        }
+
+        $prediction = MatchPrediction::create([
+            'club_match_id'        => $match->id,
+            'user_id'              => $user->id,
+            'predicted_outcome'    => $predictedOutcome,
+            'predicted_home_score' => $validated['predicted_home_score'],
+            'predicted_away_score' => $validated['predicted_away_score'],
+            'is_double'            => $isDouble,
+        ]);
 
         if ($isDouble) {
             $weekId = $match->match_week_id;
@@ -686,19 +692,16 @@ class PredictionController extends Controller
 
         $rate = $total > 0 ? $correct / $total : 0;
         $coins = match(true) {
-            $rate >= 0.51 => 500,
+            $rate >= 0.5  => 500,
             $rate >= 0.30 => 250,
             $rate >  0    => 100,
             default       => 0,
         };
 
-        // Streak: bonus semaine précédente
-        $lastWeekStart = $weekStart->copy()->subWeek();
-        $hadStreak     = PredictionWeeklyBonus::where('user_id', $predictions->first()->user_id)
-            ->where('week_start_date', $lastWeekStart->toDateString())
-            ->whereNotNull('claimed_at')
-            ->exists();
-        if ($hadStreak && $coins > 0) $coins += 100;
+        // Streak: semaines consécutives avec ≥50% de réussite
+        $userId = $predictions->first()->user_id;
+        $streak = $this->calculateStreak($userId, $weekStart);
+        if ($streak >= 1 && $coins > 0) $coins += 100;
 
         $xp = 0;
         foreach ($predictions as $p) {
@@ -708,9 +711,52 @@ class PredictionController extends Controller
             if ($exact) $xp += self::XP_EXACT;
             elseif ($winner) $xp += self::XP_WINNER;
         }
-        if ($hadStreak) $xp += 50;
+        if ($streak >= 1) $xp += 50;
 
         return [$coins, $xp];
+    }
+
+    private function calculateStreak(int $userId, Carbon $currentWeekStart): int
+    {
+        $streak         = 0;
+        $checkWeekStart = $currentWeekStart->copy()->subWeek()->startOfDay();
+
+        for ($i = 0; $i < 52; $i++) {
+            $checkWeekEnd = $checkWeekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+
+            $predictions = MatchPrediction::where('user_id', $userId)
+                ->with('match')
+                ->whereHas('match', function ($q) use ($checkWeekStart, $checkWeekEnd) {
+                    $q->where('is_cancelled', false)
+                      ->where(function ($q2) use ($checkWeekStart, $checkWeekEnd) {
+                          $q2->whereHas('matchWeek', fn($q3) => $q3->whereBetween('start_date', [
+                                  $checkWeekStart->toDateString(),
+                                  $checkWeekStart->copy()->endOfDay()->toDateTimeString(),
+                              ]))
+                             ->orWhereBetween('kickoff_at', [$checkWeekStart, $checkWeekEnd]);
+                      });
+                })
+                ->get();
+
+            if ($predictions->count() < 2) break;
+
+            $settled = $predictions->filter(fn($p) => $p->match?->result_outcome !== null);
+            if ($settled->count() < 2) break;
+
+            $settledTotal   = $settled->count();
+            $settledCorrect = $settled->filter(function ($p) {
+                $exact  = $p->predicted_home_score === $p->match->home_score && $p->predicted_away_score === $p->match->away_score;
+                $winner = $p->predicted_outcome === $p->match->result_outcome;
+                return $exact || $winner;
+            })->count();
+
+            if ($settledTotal === 0 || ($settledCorrect / $settledTotal) < 0.5) break;
+
+            $streak++;
+            $checkWeekStart = $checkWeekStart->copy()->subWeek();
+        }
+
+        return $streak;
     }
 
     private function prepareWeeklyBonusIfEligible(int $userId, ClubMatch $match): void

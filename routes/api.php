@@ -7,7 +7,6 @@ use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\TradeController;
 use App\Http\Controllers\Api\ChallengeController;
 use App\Http\Controllers\Api\FriendController;
-use App\Http\Controllers\Api\MoneyController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ProfileClubController;
 use App\Http\Controllers\Api\PredictionController;
@@ -29,7 +28,7 @@ use App\Http\Controllers\Api\ClubController;
 | Auth Routes (public)
 |--------------------------------------------------------------------------
 */
-Route::prefix('auth')->group(function () {
+Route::prefix('auth')->middleware('throttle:auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
@@ -41,7 +40,7 @@ Route::prefix('auth')->group(function () {
 | Authenticated User Routes
 |--------------------------------------------------------------------------
 */
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:api', 'active'])->group(function () {
     // Auth
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -68,14 +67,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Friends
     Route::get('/friends', [FriendController::class, 'index']);
-    Route::post('/friends/request', [FriendController::class, 'request']);
+    Route::post('/friends/request', [FriendController::class, 'request'])->middleware('throttle:friend-request');
     Route::post('/friends/{friendship}/accept', [FriendController::class, 'accept']);
     Route::post('/friends/{friendship}/decline', [FriendController::class, 'decline']);
     Route::delete('/friends/{friendship}', [FriendController::class, 'remove']);
 
     // Packs
     Route::get('/packs', [PackController::class, 'index']);
-    Route::post('/packs/opening', [PackController::class, 'opening']);
+    Route::post('/packs/opening', [PackController::class, 'opening'])->middleware('throttle:pack-opening');
     Route::post('/packs/claim', [PackController::class, 'claim']);
 
     // Échanges
@@ -85,12 +84,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/trades',                [TradeController::class, 'store']);
     Route::post('/trades/{trade}/accept', [TradeController::class, 'accept']);
     Route::post('/trades/{trade}/cancel', [TradeController::class, 'cancel']);
-
-    // Money
-    Route::get('/money', [MoneyController::class, 'index']);
-    Route::post('/money/create-intent', [MoneyController::class, 'createPaymentIntent']);
-    Route::post('/money/process', [MoneyController::class, 'processPayment']);
-    Route::get('/money/history', [MoneyController::class, 'history']);
 
     // Predictions
     Route::get('/matches/weeks', [PredictionController::class, 'weeks']);

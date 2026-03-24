@@ -1,19 +1,29 @@
 <?php
 
 return [
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'storage/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    // Méthodes REST usuelles uniquement
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    // Restreindre aux frontends connus (fallback localhost pour dev)
+    'allowed_origins' => [
+        env('FRONTEND_URL', 'http://localhost:5173'),
+    ],
 
-    'allowed_origins_patterns' => [],
+    // Autorise localhost/127.0.0.1 sur n'importe quel port en dev
+    'allowed_origins_patterns' => [
+        '#^https?://localhost(:\\d+)?$#',
+        '#^https?://127\\.0\\.0\\.1(:\\d+)?$#',
+    ],
 
-    'allowed_headers' => ['*'],
+    // Limiter aux en-têtes standards autorisés
+    'allowed_headers' => ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
 
     'exposed_headers' => [],
 
     'max_age' => 0,
 
+    // Les tokens sont portés en Authorization Bearer, pas de cookies
     'supports_credentials' => false,
 ];

@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Card;
 use App\Models\ClubTeam;
+use App\Models\Pack;
 use App\Models\Position;
 use App\Models\Rarity;
+use App\Services\ImageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
@@ -16,13 +18,14 @@ class CardController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Card::with(['position', 'rarity', 'clubTeam']);
+        $query = Card::with(['position', 'rarity', 'clubTeam', 'pack']);
         if ($request->filled('search')) $query->where('name', 'like', '%' . $request->search . '%');
         if ($request->filled('rarity')) {
             $rarity = Rarity::where('slug', $request->rarity)->first();
             if ($rarity) $query->where('rarities_id', $rarity->id);
         }
         if ($request->filled('position_id')) $query->where('positions_id', $request->position_id);
+        if ($request->filled('pack_id')) $query->where('pack_id', $request->pack_id);
         $user = $request->user();
         if ($user && !$user->is_super_admin && $user->club_team_id) {
             $query->where('club_team_id', $user->club_team_id);
@@ -45,13 +48,21 @@ class CardController extends Controller
             'positions_id' => $card->positions_id,
             'rarities_id' => $card->rarities_id,
             'club_team_id' => $card->club_team_id,
+            'pack_id' => $card->pack_id,
+            'pack_name' => $card->pack?->name,
         ]);
+
+        $packsQuery = Pack::orderBy('name');
+        if ($user && !$user->is_super_admin && $user->club_team_id) {
+            $packsQuery->where('club_team_id', $user->club_team_id);
+        }
 
         return response()->json([
             'cards' => $cards,
             'positions' => Position::orderBy('name')->get(['id', 'name']),
             'rarities' => Rarity::orderBy('drop_rate', 'desc')->get(['id', 'name', 'slug', 'color']),
             'club_teams' => ClubTeam::orderBy('name')->get(['id', 'name', 'short_name', 'is_active']),
+            'packs' => $packsQuery->get(['id', 'name', 'club_team_id']),
         ]);
     }
 
@@ -65,6 +76,7 @@ class CardController extends Controller
                 'positions_id' => $card->positions_id,
                 'rarities_id' => $card->rarities_id,
                 'club_team_id' => $card->club_team_id,
+                'pack_id' => $card->pack_id,
                 'attack' => $card->attack,
                 'defense' => $card->defense,
                 'speed' => $card->speed,
@@ -75,6 +87,7 @@ class CardController extends Controller
             ],
             'positions' => Position::orderBy('name')->get(['id', 'name']),
             'rarities' => Rarity::orderBy('drop_rate', 'desc')->get(['id', 'name', 'slug', 'color', 'drop_rate']),
+            'packs' => Pack::orderBy('name')->get(['id', 'name', 'club_team_id']),
         ]);
     }
 
@@ -83,6 +96,7 @@ class CardController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'club_team_id' => 'nullable|exists:club_teams,id',
+            'pack_id' => 'nullable|exists:packs,id',
             'positions_id' => 'required|exists:positions,id',
             'rarities_id' => 'required|exists:rarities,id',
             'attack' => 'required|integer|min:0|max:99',
@@ -90,16 +104,11 @@ class CardController extends Controller
             'speed' => 'required|integer|min:0|max:99',
             'stamina' => 'required|integer|min:0|max:99',
             'number' => 'nullable|integer|min:0',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:4096',
         ]);
 
         if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $directory = public_path('assets/players');
-            if (!File::exists($directory)) File::makeDirectory($directory, 0755, true);
-            $file->move($directory, $filename);
-            $validated['image'] = '/assets/players/' . $filename;
+            $validated['image'] = app(ImageService::class)->store($request->file('image'), 'assets/players', 600, 900);
         }
 
         $card = Card::create($validated);
@@ -116,6 +125,7 @@ class CardController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'club_team_id' => 'nullable|exists:club_teams,id',
+            'pack_id' => 'nullable|exists:packs,id',
             'positions_id' => 'required|exists:positions,id',
             'rarities_id' => 'required|exists:rarities,id',
             'attack' => 'required|integer|min:0|max:99',
@@ -123,17 +133,15 @@ class CardController extends Controller
             'speed' => 'required|integer|min:0|max:99',
             'stamina' => 'required|integer|min:0|max:99',
             'number' => 'nullable|integer|min:0',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:4096',
         ]);
 
         if ($request->hasFile('image')) {
-            if ($card->image && File::exists(public_path($card->image))) File::delete(public_path($card->image));
-            $file = $request->file('image');
-            $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $directory = public_path('assets/players');
-            if (!File::exists($directory)) File::makeDirectory($directory, 0755, true);
-            $file->move($directory, $filename);
-            $validated['image'] = '/assets/players/' . $filename;
+            if ($card->image && str_starts_with($card->image, '/assets/players/')) {
+                $old = public_path(ltrim($card->image, '/'));
+                if (File::exists($old)) File::delete($old);
+            }
+            $validated['image'] = app(ImageService::class)->store($request->file('image'), 'assets/players', 600, 900);
         } else {
             unset($validated['image']);
         }

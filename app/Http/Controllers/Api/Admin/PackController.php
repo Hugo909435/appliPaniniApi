@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Pack;
+use App\Services\ImageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
@@ -32,7 +33,6 @@ class PackController extends Controller
             'description'   => $pack->description,
             'image'         => $pack->image_url,
             'price'         => $pack->price,
-            'money_price'   => $pack->money_price,
             'card_count'    => $pack->card_count,
             'is_active'     => $pack->is_active,
             'rarity_boosts' => $pack->rarity_boosts,
@@ -49,17 +49,18 @@ class PackController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255|unique:packs,slug',
             'description' => 'nullable|string',
-            'price' => 'required|integer|min:0',
-            'money_price' => 'required|integer|min:0',
-            'card_count' => 'required|integer|min:1|max:99',
+            'price' => 'nullable|integer|min:0',
+            'card_count' => 'nullable|integer|min:1|max:99',
             'is_active' => 'boolean',
             'club_team_id' => 'nullable|integer|exists:club_teams,id',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:4096',
             'image_url' => 'nullable|string|max:255',
         ]);
 
         $validated['slug'] = $validated['slug'] ?? Str::slug($validated['name']);
         $validated['is_active'] = $request->boolean('is_active', true);
+        $validated['price'] = $validated['price'] ?? 0;
+        $validated['card_count'] = $validated['card_count'] ?? 5;
 
         // Scope to admin's club unless super admin provides explicit club_team_id
         if (!$admin->is_super_admin) {
@@ -69,7 +70,7 @@ class PackController extends Controller
         }
 
         if ($request->hasFile('image')) {
-            $validated['image'] = $this->storeImage($request->file('image'));
+            $validated['image'] = app(ImageService::class)->store($request->file('image'), 'assets/packs', 600, 900);
         } elseif (!empty($validated['image_url'])) {
             $validated['image'] = $validated['image_url'];
         }
@@ -92,11 +93,10 @@ class PackController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255|unique:packs,slug,' . $pack->id,
             'description' => 'nullable|string',
-            'price' => 'required|integer|min:0',
-            'money_price' => 'required|integer|min:0',
-            'card_count' => 'required|integer|min:1|max:99',
+            'price' => 'nullable|integer|min:0',
+            'card_count' => 'nullable|integer|min:1|max:99',
             'is_active' => 'boolean',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:4096',
             'image_url' => 'nullable|string|max:255',
         ]);
 
@@ -105,7 +105,7 @@ class PackController extends Controller
 
         if ($request->hasFile('image')) {
             $this->deleteImageIfLocal($pack->image);
-            $validated['image'] = $this->storeImage($request->file('image'));
+            $validated['image'] = app(ImageService::class)->store($request->file('image'), 'assets/packs', 600, 900);
         } elseif (!empty($validated['image_url'])) {
             $this->deleteImageIfLocal($pack->image);
             $validated['image'] = $validated['image_url'];
@@ -153,17 +153,6 @@ class PackController extends Controller
         $pack->update(['rarity_boosts' => $validated['rarity_boosts']]);
 
         return response()->json(['message' => 'Probabilités mises à jour.', 'pack' => $pack]);
-    }
-
-    private function storeImage($file): string
-    {
-        $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-        $directory = public_path('assets/packs');
-        if (!File::exists($directory)) {
-            File::makeDirectory($directory, 0755, true);
-        }
-        $file->move($directory, $filename);
-        return '/assets/packs/' . $filename;
     }
 
     private function deleteImageIfLocal(?string $path): void

@@ -12,6 +12,7 @@ use App\Models\Position;
 use App\Models\Rarity;
 use App\Models\User;
 use App\Models\UserProfile;
+use App\Services\ImageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -32,7 +33,7 @@ class ClubController extends Controller
         $data = $request->validate([
             'name'         => ['required', 'string', 'max:255', 'unique:club_teams,name'],
             'logo'         => ['nullable', 'string'],
-            'logo_file'    => ['nullable', 'image', 'max:2048'],
+            'logo_file'    => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:4096'],
             'primary_color'=> ['nullable', 'string', 'max:9'],
             'theme_slug'   => ['nullable', 'string', 'in:default,red,orange,blue_yellow,blue,green_red,violet,mono,red_black,red_white,blue_white,blue_red,green_white,green_yellow,orange_black,purple_yellow,teal_orange'],
         ]);
@@ -41,8 +42,7 @@ class ClubController extends Controller
         $club->name = $data['name'];
         $club->short_name = $data['name'];
         if ($request->hasFile('logo_file')) {
-            $path = $request->file('logo_file')->store('clubs', 'public');
-            $club->logo = Storage::disk('public')->url($path);
+            $club->logo = app(ImageService::class)->store($request->file('logo_file'), 'assets/clubs', 300, 300, 90);
         } elseif (isset($data['logo'])) {
             $club->logo = $data['logo'];
         }
@@ -94,8 +94,7 @@ class ClubController extends Controller
             $clubTeam->theme_slug = $data['theme_slug'];
         }
         if ($request->hasFile('logo_file')) {
-            $path = $request->file('logo_file')->store('clubs', 'public');
-            $clubTeam->logo = Storage::disk('public')->url($path);
+            $clubTeam->logo = app(ImageService::class)->store($request->file('logo_file'), 'assets/clubs', 300, 300, 90);
         }
         if (array_key_exists('is_active', $data)) {
             $clubTeam->is_active = (bool) $data['is_active'];
@@ -137,7 +136,7 @@ class ClubController extends Controller
                 'status' => $u->status ?? 'active',
             ]);
 
-        $cards = Card::with(['rarity', 'position'])
+        $cards = Card::with(['rarity', 'position', 'pack'])
             ->where('club_team_id', $clubTeam->id)
             ->limit(200)
             ->get()
@@ -151,6 +150,8 @@ class ClubController extends Controller
                     'rarity_color' => $c->rarity?->color,
                     'positions_id' => $c->positions_id,
                     'position' => $c->position?->name,
+                    'pack_id' => $c->pack_id,
+                    'pack_name' => $c->pack?->name,
                     'number' => $c->number,
                     'attack' => $c->attack,
                     'defense' => $c->defense,
@@ -199,7 +200,6 @@ class ClubController extends Controller
                 'description' => $p->description,
                 'image' => $p->image_url,
                 'price' => $p->price,
-                'money_price' => $p->money_price,
                 'card_count' => $p->card_count,
                 'is_active'     => (bool) $p->is_active,
                 'rarity_boosts' => $p->rarity_boosts,
@@ -244,6 +244,54 @@ class ClubController extends Controller
                 SUM(CASE WHEN match_predictions.rewarded_at IS NOT NULL THEN 1 ELSE 0 END) as rewarded
             ")
             ->first();
+
+        // Pronostics par match : total / score exact / bon vainqueur / perdus
+        $matchPredictionBreakdown = \DB::table('match_predictions')
+            ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
+            ->join('club_teams', 'club_teams.id', '=', 'club_matches.club_team_id')
+            ->whereIn('club_matches.club_team_id', $clubIds) // inclut club parent + enfants
+            ->selectRaw("
+                club_matches.id as match_id,
+                CASE WHEN club_matches.is_home = 1 THEN club_teams.name ELSE club_matches.opponent_name END as home_name,
+                CASE WHEN club_matches.is_home = 1 THEN club_matches.opponent_name ELSE club_teams.name END as away_name,
+                club_matches.kickoff_at,
+                club_matches.home_score,
+                club_matches.away_score,
+                club_matches.result_outcome,
+                COUNT(*) as total,
+                SUM(
+                    CASE
+                        WHEN club_matches.home_score IS NOT NULL
+                         AND club_matches.away_score IS NOT NULL
+                         AND match_predictions.predicted_home_score = club_matches.home_score
+                         AND match_predictions.predicted_away_score = club_matches.away_score
+                        THEN 1 ELSE 0 END
+                ) as exact_score,
+                SUM(
+                    CASE
+                        WHEN club_matches.result_outcome IS NOT NULL
+                         AND match_predictions.predicted_outcome = club_matches.result_outcome
+                        THEN 1 ELSE 0 END
+                ) as correct_outcome,
+                SUM(
+                    CASE
+                        WHEN club_matches.result_outcome IS NOT NULL
+                         AND match_predictions.predicted_outcome <> club_matches.result_outcome
+                        THEN 1 ELSE 0 END
+                ) as wrong_outcome
+            ")
+            ->groupBy(
+                'club_matches.id',
+                'club_matches.is_home',
+                'club_teams.name',
+                'club_matches.opponent_name',
+                'club_matches.kickoff_at',
+                'club_matches.home_score',
+                'club_matches.away_score',
+                'club_matches.result_outcome'
+            )
+            ->orderByDesc('club_matches.kickoff_at')
+            ->get();
 
         // ── Collection completion par utilisateur ─────────────────────────────
         $totalCards = Card::whereIn('club_team_id', $clubIds)->count();
@@ -342,6 +390,11 @@ class ClubController extends Controller
         ])->sortByDesc('percent')->values();
 
         return response()->json([
+            'club' => [
+                'id'   => $clubTeam->id,
+                'name' => $clubTeam->name,
+                'slug' => $clubTeam->slug,
+            ],
             'trades' => [
                 'total'     => (int) $tradeSummary->total,
                 'ongoing'   => (int) $tradeSummary->ongoing,
@@ -352,6 +405,7 @@ class ClubController extends Controller
                 'total'    => (int) $predStats->total,
                 'ongoing'  => (int) $predStats->ongoing,
                 'rewarded' => (int) $predStats->rewarded,
+                'by_match' => $matchPredictionBreakdown,
             ],
             'collection' => [
                 'total_cards' => $totalCards,

@@ -4,8 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Card;
+use App\Models\Pack;
+use App\Models\Position;
+use App\Models\Rarity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class CollectionController extends Controller
 {
@@ -15,7 +19,7 @@ class CollectionController extends Controller
         $clubId = $user->club_team_id;
 
         $ownedCards = $user->cards()
-            ->with(['position', 'rarity', 'clubTeam'])
+            ->with(['position', 'rarity', 'clubTeam', 'pack'])
             ->when($clubId, fn($q) => $q->where('cards.club_team_id', $clubId))
             ->get()
             ->map(fn($card) => [
@@ -34,9 +38,11 @@ class CollectionController extends Controller
                 'overall' => $card->overall,
                 'number' => $card->number,
                 'quantity' => $card->pivot->quantity,
+                'pack_id' => $card->pack_id,
+                'pack_name' => $card->pack?->name,
             ]);
 
-        $allCards = Card::with(['position', 'rarity', 'clubTeam'])
+        $allCards = Card::with(['position', 'rarity', 'clubTeam', 'pack'])
             ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
             ->get()
             ->map(fn($card) => [
@@ -54,12 +60,25 @@ class CollectionController extends Controller
                 'stamina' => $card->stamina,
                 'overall' => $card->overall,
                 'number' => $card->number,
+                'pack_id' => $card->pack_id,
+                'pack_name' => $card->pack?->name,
             ]);
+
+        // Référentiels mis en cache 10 min
+        $rarities = Cache::remember('ref:rarities:v1', 600, fn () => Rarity::select('id', 'slug', 'name', 'color')->orderBy('id')->get());
+        $positions = Cache::remember('ref:positions:v1', 600, fn () => Position::select('id', 'name')->orderBy('name')->get());
+        $packs = Cache::remember("ref:packs:club:" . ($clubId ?? 'all') . ":v1", 600, fn () =>
+            Pack::when($clubId, fn($q) => $q->where('club_team_id', $clubId))
+                ->orderByDesc('id')
+                ->get(['id', 'name'])
+        );
+
         return response()->json([
             'cards' => $ownedCards,
             'all_cards' => $allCards,
-            'rarities' => $allCards->pluck('rarity')->unique()->values(),
-            'positions' => $allCards->pluck('position')->filter()->unique()->values(),
+            'rarities' => $rarities,
+            'positions' => $positions,
+            'packs' => $packs->map(fn($p) => ['id' => $p->id, 'name' => $p->name]),
         ]);
     }
 
@@ -135,9 +154,13 @@ class CollectionController extends Controller
         $userCard = $user->cards()->where('card_id', $card->id)->first();
         $card->load(['position', 'rarity', 'clubTeam']);
 
-        $availableForTrade = Card::whereNotIn('id', $user->cards()->pluck('cards.id'))
-            ->with(['position', 'rarity'])
+        // Suggestions de cartes non possédées : requête NOT EXISTS + projection légère
+        $availableForTrade = Card::select(['id', 'name', 'positions_id', 'rarities_id', 'club_team_id', 'image'])
+            ->with(['position:id,name', 'rarity:id,slug', 'clubTeam:id,name'])
             ->when($clubId, fn($q) => $q->where('club_team_id', $clubId))
+            ->whereDoesntHave('userCards', fn($q) => $q->where('user_id', $user->id))
+            ->orderBy('id')
+            ->limit(50)
             ->get()
             ->map(fn($c) => [
                 'id' => $c->id,

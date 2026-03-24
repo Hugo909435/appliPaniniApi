@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Card;
 use App\Models\ClubTeam;
+use App\Models\Pack;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -17,6 +18,7 @@ class CardSeeder extends Seeder
 
     private array $positionIds = [];
     private array $rarityIds = [];
+    private array $clubPackIds = [];
 
     public function run(): void
     {
@@ -74,6 +76,7 @@ class CardSeeder extends Seeder
                 'stamina' => rand(25, 95),
                 'image' => $randomImage,
                 'club_team_id' => $clubId,
+                'pack_id' => $this->clubPackIds[$clubId] ?? null,
             ]);
         }
     }
@@ -88,6 +91,13 @@ class CardSeeder extends Seeder
         $rarities = DB::table('rarities')->get();
         foreach ($rarities as $rarity) {
             $this->rarityIds[$rarity->slug] = $rarity->id;
+        }
+
+        $packs = Pack::orderBy('id')->get();
+        foreach ($packs as $pack) {
+            if ($pack->club_team_id && !isset($this->clubPackIds[$pack->club_team_id])) {
+                $this->clubPackIds[$pack->club_team_id] = $pack->id;
+            }
         }
     }
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Card extends Model
 {
@@ -13,6 +14,7 @@ class Card extends Model
     protected $fillable = [
         'name',
         'club_team_id',
+        'pack_id',
         'positions_id',
         'rarities_id',
         'image',
@@ -53,6 +55,11 @@ class Card extends Model
         return $this->belongsTo(ClubTeam::class);
     }
 
+    public function pack(): BelongsTo
+    {
+        return $this->belongsTo(Pack::class);
+    }
+
     public function position(): BelongsTo
     {
         return $this->belongsTo(Position::class, 'positions_id');
@@ -61,6 +68,11 @@ class Card extends Model
     public function rarity(): BelongsTo
     {
         return $this->belongsTo(Rarity::class, 'rarities_id');
+    }
+
+    public function userCards(): HasMany
+    {
+        return $this->hasMany(UserCard::class);
     }
 
     public function getPositionNameAttribute(): ?string
@@ -100,5 +112,4 @@ class Card extends Model
         ];
     }
 }
-
 

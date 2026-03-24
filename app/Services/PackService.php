@@ -26,7 +26,7 @@ class PackService
 
     const SPECIAL_CHANCE = 1;
 
-    public function openPack(User $user, bool $isFree = false, ?int $packId = null, bool $useMoney = false): array
+    public function openPack(User $user, bool $isFree = false, ?int $packId = null): array
     {
         $pack = $packId ? Pack::findOrFail($packId) : null;
         $packSize = $pack ? $pack->card_count : self::PACK_SIZE;
@@ -37,20 +37,13 @@ class PackService
             if (!$user->useFreePack()) {
                 throw new \Exception('Pas de pack gratuit disponible');
             }
-        } elseif ($useMoney) {
-            $moneyCost = $pack ? $pack->money_price : 0;
-            if ($user->money < $moneyCost) {
-                throw new \Exception('Pas assez de money');
-            }
-            $user->money -= $moneyCost;
-            $user->save();
         } else {
             if (!$user->removeCoins($packCost)) {
                 throw new \Exception('Pas assez de pièces');
             }
         }
 
-        $cards = $this->generatePackCards($packSize, $clubTeamId, $pack?->rarity_boosts);
+        $cards = $this->generatePackCards($packSize, $clubTeamId, $pack?->rarity_boosts, $pack?->id);
 
         foreach ($cards as $card) {
             $user->addCard($card);
@@ -64,15 +57,14 @@ class PackService
         $user->refresh();
 
         return [
-            'cards'      => $cards,
-            'user'       => $user,
-            'is_free'    => $isFree,
-            'used_money' => $useMoney,
-            'pack'       => $pack,
+            'cards'   => $cards,
+            'user'    => $user,
+            'is_free' => $isFree,
+            'pack'    => $pack,
         ];
     }
 
-    protected function generatePackCards(int $packSize, ?int $clubTeamId = null, ?array $rarityBoosts = null): Collection
+    protected function generatePackCards(int $packSize, ?int $clubTeamId = null, ?array $rarityBoosts = null, ?int $packId = null): Collection
     {
         $cards = collect();
 
@@ -90,6 +82,9 @@ class PackService
         if ($clubTeamId) {
             $countsQuery->where('cards.club_team_id', $clubTeamId);
         }
+        if ($packId) {
+            $countsQuery->where('cards.pack_id', $packId);
+        }
         $availableCounts = $countsQuery
             ->groupBy('rarities.slug')
             ->selectRaw('rarities.slug, COUNT(*) as total')
@@ -101,6 +96,9 @@ class PackService
             ->whereIn('rarities.slug', $specialSlugs);
         if ($clubTeamId) {
             $specialQuery->where('cards.club_team_id', $clubTeamId);
+        }
+        if ($packId) {
+            $specialQuery->where('cards.pack_id', $packId);
         }
         $specialCount = empty($specialSlugs) ? 0 : $specialQuery->count();
 
@@ -116,44 +114,66 @@ class PackService
             $filteredRarities = self::RARITIES;
         }
 
-        for ($i = 0; $i < $packSize; $i++) {
-            $raritySlug = $this->pickRandomRarity($filteredRarities);
-
-            if ($raritySlug === 'special' && !empty($specialSlugs)) {
-                $card = Card::with(['position', 'rarity'])
-                    ->whereHas('rarity', fn($q) => $q->whereIn('slug', $specialSlugs))
-                    ->when($clubTeamId, fn($q) => $q->where('club_team_id', $clubTeamId))
-                    ->inRandomOrder()
-                    ->first();
+        // Pre-fetch card IDs by rarity — évite N requêtes ORDER BY RAND()
+        $cardIdsByRarity = [];
+        foreach (array_keys($filteredRarities) as $slug) {
+            if ($slug === 'special') {
+                $cardIdsByRarity[$slug] = \DB::table('cards')
+                    ->join('rarities', 'rarities.id', '=', 'cards.rarities_id')
+                    ->whereIn('rarities.slug', $specialSlugs)
+                    ->when($clubTeamId, fn($q) => $q->where('cards.club_team_id', $clubTeamId))
+                    ->when($packId, fn($q) => $q->where('cards.pack_id', $packId))
+                    ->pluck('cards.id')->toArray();
             } else {
-                $card = Card::with(['position', 'rarity'])
-                    ->where('is_exclusive', false)
-                    ->whereHas('rarity', fn($q) => $q->where('slug', $raritySlug))
-                    ->when($clubTeamId, fn($q) => $q->where('club_team_id', $clubTeamId))
-                    ->inRandomOrder()
-                    ->first();
-            }
-
-            if (!$card) {
-                $card = Card::with(['position', 'rarity'])
-                    ->where('is_exclusive', false)
-                    ->when($clubTeamId, fn($q) => $q->where('club_team_id', $clubTeamId))
-                    ->inRandomOrder()
-                    ->first();
-            }
-
-            if ($card) {
-                $cards->push($card);
+                $cardIdsByRarity[$slug] = \DB::table('cards')
+                    ->join('rarities', 'rarities.id', '=', 'cards.rarities_id')
+                    ->where('cards.is_exclusive', false)
+                    ->where('rarities.slug', $slug)
+                    ->when($clubTeamId, fn($q) => $q->where('cards.club_team_id', $clubTeamId))
+                    ->when($packId, fn($q) => $q->where('cards.pack_id', $packId))
+                    ->pluck('cards.id')->toArray();
             }
         }
 
-        return $cards;
+        $fallbackIds = \DB::table('cards')
+            ->where('is_exclusive', false)
+            ->when($clubTeamId, fn($q) => $q->where('club_team_id', $clubTeamId))
+            ->when($packId, fn($q) => $q->where('pack_id', $packId))
+            ->pluck('id')->toArray();
+
+        // Tirage aléatoire en PHP — plus de ORDER BY RAND()
+        $selectedIds = [];
+        for ($i = 0; $i < $packSize; $i++) {
+            $raritySlug = $this->pickRandomRarity($filteredRarities);
+            $pool = $cardIdsByRarity[$raritySlug] ?? [];
+            if (empty($pool)) {
+                $pool = $fallbackIds;
+            }
+            if (!empty($pool)) {
+                $selectedIds[] = $pool[array_rand($pool)];
+            }
+        }
+
+        if (empty($selectedIds)) {
+            return collect();
+        }
+
+        // Une seule requête eager-loaded pour toutes les cartes sélectionnées
+        $loadedCards = Card::with(['position', 'rarity'])
+            ->whereIn('id', $selectedIds)
+            ->get()
+            ->keyBy('id');
+
+        return collect($selectedIds)
+            ->map(fn($id) => $loadedCards->get($id))
+            ->filter()
+            ->values();
     }
 
     protected function pickRandomRarity(array $rarities): string
     {
         $totalWeight   = array_sum($rarities);
-        $random        = mt_rand(1, (int) ($totalWeight * 100)) / 100;
+        $random        = random_int(1, (int) ($totalWeight * 10000)) / 10000;
         $currentWeight = 0;
 
         foreach ($rarities as $rarity => $probability) {
@@ -163,7 +183,7 @@ class PackService
             }
         }
 
-        return 'common';
+        return array_key_last($rarities) ?? 'common';
     }
 
     public function getTimeUntilNextFreePack(User $user): ?int

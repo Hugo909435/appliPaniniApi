@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\TradeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TradeController extends Controller
 {
@@ -33,6 +34,13 @@ class TradeController extends Controller
     {
         $user = $request->user();
 
+        // Précharge les card_ids possédés par l'utilisateur pour calculer can_accept
+        $ownedCardIds = DB::table('user_cards')
+            ->where('user_id', $user->id)
+            ->where('quantity', '>=', 1)
+            ->pluck('card_id')
+            ->all();
+
         $query = Trade::with(['proposer', 'offeredCard.rarity', 'offeredCard.position', 'requestedCard.rarity', 'requestedCard.position'])
             ->where('status', 'pending')
             ->where('proposer_id', '!=', $user->id)
@@ -44,7 +52,7 @@ class TradeController extends Controller
             $query->whereHas('offeredCard.rarity', fn($q) => $q->whereIn('slug', $slugs));
         }
 
-        $trades = $query->paginate(12)->through(fn($trade) => $this->formatTrade($trade, $user));
+        $trades = $query->paginate(12)->through(fn($trade) => $this->formatTrade($trade, $user, $ownedCardIds));
 
         return response()->json(['trades' => $trades]);
     }
@@ -123,12 +131,17 @@ class TradeController extends Controller
 
     // ─── Format ───────────────────────────────────────────────────────────────
 
-    private function formatTrade(Trade $trade, User $me): array
+    private function formatTrade(Trade $trade, User $me, array $ownedCardIds = []): array
     {
+        $canAccept = $trade->isPending()
+            && $trade->proposer_id !== $me->id
+            && in_array($trade->requested_card_id, $ownedCardIds);
+
         return [
             'id'              => $trade->id,
             'status'          => $trade->status,
             'is_proposer'     => $trade->proposer_id === $me->id,
+            'can_accept'      => $canAccept,
             'proposer'        => ['id' => $trade->proposer?->id, 'name' => $trade->proposer?->name],
             'receiver'        => $trade->receiver ? ['id' => $trade->receiver->id, 'name' => $trade->receiver->name] : null,
             'offered_card'    => $trade->offeredCard ? $this->formatCard($trade->offeredCard) : null,
