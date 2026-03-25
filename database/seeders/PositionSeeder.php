@@ -15,10 +15,13 @@ class PositionSeeder extends Seeder
             ['name' => 'Milieu'],
             ['name' => 'Attaquant'],
             ['name' => 'Entraîneur'],
+            ['name' => 'Président'],
+            ['name' => 'Supporter'],
+            ['name' => 'Bénévole'],
         ];
 
         DB::table('positions')->insert($positions);
 
-        $this->command->info('5 positions créées avec succès !');
+        $this->command->info('8 positions créées avec succès !');
     }
 }

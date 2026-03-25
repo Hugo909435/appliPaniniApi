@@ -18,6 +18,7 @@ class ClubTeam extends Model
         'primary_color',
         'theme_slug',
         'is_main_club',
+        'parent_id',
     ];
 
     protected function casts(): array

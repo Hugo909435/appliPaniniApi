@@ -26,7 +26,7 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'coins' => 0,
+            'coins' => 100,
             'money' => 0,
             'level' => 1,
             'free_packs' => 0,

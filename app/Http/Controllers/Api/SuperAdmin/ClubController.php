@@ -136,8 +136,8 @@ class ClubController extends Controller
                 'status' => $u->status ?? 'active',
             ]);
 
-        $cards = Card::with(['rarity', 'position', 'pack'])
-            ->where('club_team_id', $clubTeam->id)
+        $cards = Card::with(['rarity', 'position', 'pack', 'clubTeam'])
+            ->whereIn('club_team_id', $clubIds)
             ->limit(200)
             ->get()
             ->map(function ($c) {
@@ -150,6 +150,8 @@ class ClubController extends Controller
                     'rarity_color' => $c->rarity?->color,
                     'positions_id' => $c->positions_id,
                     'position' => $c->position?->name,
+                    'club_team_id' => $c->club_team_id,
+                    'team' => $c->clubTeam?->name,
                     'pack_id' => $c->pack_id,
                     'pack_name' => $c->pack?->name,
                     'number' => $c->number,

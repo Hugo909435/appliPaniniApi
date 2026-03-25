@@ -64,12 +64,14 @@ class ImageService
         $mime = $file->getMimeType() ?? '';
         $path = $file->getRealPath();
 
+        $can = fn(string $fn) => function_exists($fn);
+
         return match (true) {
-            str_contains($mime, 'jpeg') => imagecreatefromjpeg($path) ?: null,
-            str_contains($mime, 'png')  => imagecreatefrompng($path)  ?: null,
-            str_contains($mime, 'webp') => imagecreatefromwebp($path) ?: null,
-            str_contains($mime, 'gif')  => imagecreatefromgif($path)  ?: null,
-            default                      => null,
+            str_contains($mime, 'jpeg') && $can('imagecreatefromjpeg') => @imagecreatefromjpeg($path) ?: null,
+            str_contains($mime, 'png')  && $can('imagecreatefrompng')  => @imagecreatefrompng($path)  ?: null,
+            str_contains($mime, 'webp') && $can('imagecreatefromwebp') => @imagecreatefromwebp($path) ?: null,
+            str_contains($mime, 'gif')  && $can('imagecreatefromgif')  => @imagecreatefromgif($path)  ?: null,
+            default => null,
         };
     }
 }

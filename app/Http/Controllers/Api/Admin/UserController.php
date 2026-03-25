@@ -60,6 +60,10 @@ class UserController extends Controller
             'email'        => $validated['email'],
             'password'     => Hash::make($validated['password']),
             'club_team_id' => $validated['club_team_id'] ?? null,
+            'coins'        => 100,
+            'money'        => 0,
+            'level'        => 1,
+            'free_packs'   => 0,
         ]);
 
         return response()->json([
