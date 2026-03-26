@@ -13,6 +13,7 @@ class Card extends Model
 
     protected $fillable = [
         'name',
+        'description',
         'club_team_id',
         'pack_id',
         'positions_id',

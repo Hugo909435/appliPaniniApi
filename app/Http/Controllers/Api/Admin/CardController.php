@@ -34,6 +34,7 @@ class CardController extends Controller
         $cards = $query->latest()->paginate(20)->through(fn($card) => [
             'id' => $card->id,
             'name' => $card->name,
+            'description' => $card->description,
             'position' => $card->position?->name,
             'rarity' => $card->rarity?->slug,
             'rarity_label' => $card->rarity?->name,
@@ -73,6 +74,7 @@ class CardController extends Controller
             'card' => [
                 'id' => $card->id,
                 'name' => $card->name,
+                'description' => $card->description,
                 'positions_id' => $card->positions_id,
                 'rarities_id' => $card->rarities_id,
                 'club_team_id' => $card->club_team_id,
@@ -95,6 +97,7 @@ class CardController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'description' => 'nullable|string|max:1000',
             'club_team_id' => 'nullable|exists:club_teams,id',
             'pack_id' => 'nullable|exists:packs,id',
             'positions_id' => 'required|exists:positions,id',
@@ -124,6 +127,7 @@ class CardController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'description' => 'nullable|string|max:1000',
             'club_team_id' => 'nullable|exists:club_teams,id',
             'pack_id' => 'nullable|exists:packs,id',
             'positions_id' => 'required|exists:positions,id',

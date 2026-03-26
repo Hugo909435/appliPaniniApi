@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Http\Controllers\Api\Admin;
-
 use App\Http\Controllers\Controller;
 use App\Jobs\AwardPredictionRewards;
 use App\Models\ClubMatch;
@@ -11,21 +9,19 @@ use App\Models\MatchWeek;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
 class ClubMatchController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         $query = ClubMatch::with('clubTeam')->orderBy('kickoff_at');
         $user = $request->user();
-        if ($user && !$user->is_super_admin && $user->club_team_id) {
-            $query->where('club_team_id', $user->club_team_id);
+        $allowedClubIds = $this->allowedClubIds($user);
+        if ($allowedClubIds) {
+            $query->whereIn('club_team_id', $allowedClubIds);
         }
-
         if ($request->filled('team_id')) {
             $query->where('club_team_id', $request->team_id);
         }
-
         if ($request->filled('week_id')) {
             $query->where('match_week_id', $request->week_id);
         } elseif ($request->filled('week_start')) {
@@ -33,7 +29,6 @@ class ClubMatchController extends Controller
             $end = $start->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
             $query->whereBetween('kickoff_at', [$start, $end]);
         }
-
         if ($request->filled('status')) {
             if ($request->status === 'upcoming') {
                 $query->where('kickoff_at', '>', now());
@@ -42,15 +37,17 @@ class ClubMatchController extends Controller
                 $query->whereNotNull('result_outcome');
             }
         }
-
         $matches = $query->get()->map(fn($match) => $this->mapMatch($match));
+        $teams = ClubTeam::when($allowedClubIds, fn($q) => $q->whereIn('id', $allowedClubIds))
+            ->where('is_main_club', false)
+            ->orderBy('name')
+            ->get(['id', 'name', 'short_name', 'is_active']);
 
         return response()->json([
             'matches' => $matches,
-            'teams' => ClubTeam::orderBy('name')->get(['id', 'name', 'short_name', 'is_active']),
+            'teams' => $teams,
         ]);
     }
-
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -63,27 +60,28 @@ class ClubMatchController extends Controller
             'away_score' => 'nullable|integer|min:0|max:99',
             'is_cancelled' => 'sometimes|boolean',
         ]);
-
+        $user = $request->user();
+        $allowedClubIds = $this->allowedClubIds($user);
+        if ($allowedClubIds && !in_array($validated['club_team_id'], $allowedClubIds, true)) {
+            return response()->json(['message' => 'Accès refusé pour ce club.'], 403);
+        }
         $validated['location'] = $request->input('location') ?? '';
         $validated['match_week_id'] = $this->resolveMatchWeekId($validated['kickoff_at']);
         if (!empty($validated['is_cancelled'])) {
             $validated['home_score'] = null;
             $validated['away_score'] = null;
         }
-
         $match = ClubMatch::create($validated);
         $this->applyResultIfAny($match);
-
         return response()->json(['message' => 'Match créé.', 'match' => $this->mapMatch($match->fresh('clubTeam'))], 201);
     }
-
     public function update(Request $request, ClubMatch $clubMatch): JsonResponse
     {
         $admin = $request->user();
-        if (!$admin->is_super_admin && $admin->club_team_id && $clubMatch->club_team_id !== $admin->club_team_id) {
+        $allowedClubIds = $this->allowedClubIds($admin);
+        if ($allowedClubIds && !in_array($clubMatch->club_team_id, $allowedClubIds, true)) {
             return response()->json(['message' => 'Accès refusé.'], 403);
         }
-
         $validated = $request->validate([
             'club_team_id' => 'required|exists:club_teams,id',
             'opponent_name' => 'required|string|max:100',
@@ -94,32 +92,30 @@ class ClubMatchController extends Controller
             'away_score' => 'nullable|integer|min:0|max:99',
             'is_cancelled' => 'sometimes|boolean',
         ]);
-
+        if ($allowedClubIds && !in_array($validated['club_team_id'], $allowedClubIds, true)) {
+            return response()->json(['message' => 'Accès refusé pour ce club.'], 403);
+        }
         $validated['location'] = $validated['location'] ?? '';
         $validated['match_week_id'] = $this->resolveMatchWeekId($validated['kickoff_at']);
         if (!empty($validated['is_cancelled'])) {
             $validated['home_score'] = null;
             $validated['away_score'] = null;
         }
-
         $previousOutcome = $clubMatch->result_outcome;
         $clubMatch->update($validated);
         $this->applyResultIfAny($clubMatch, $previousOutcome);
-
         return response()->json(['message' => 'Match mis à jour.', 'match' => $this->mapMatch($clubMatch->fresh('clubTeam'))]);
     }
-
     public function destroy(Request $request, ClubMatch $clubMatch): JsonResponse
     {
         $admin = $request->user();
-        if (!$admin->is_super_admin && $admin->club_team_id && $clubMatch->club_team_id !== $admin->club_team_id) {
+        $allowedClubIds = $this->allowedClubIds($admin);
+        if ($allowedClubIds && !in_array($clubMatch->club_team_id, $allowedClubIds, true)) {
             return response()->json(['message' => 'Accès refusé.'], 403);
         }
-
         $clubMatch->delete();
         return response()->json(['message' => 'Match supprimé.']);
     }
-
     private function applyResultIfAny(ClubMatch $match, ?string $previousOutcome = null): void
     {
         if ($match->is_cancelled) {
@@ -134,26 +130,21 @@ class ClubMatchController extends Controller
             }
             return;
         }
-
         $match->forceFill([
             'result_outcome' => $outcome,
             'result_set_at' => $match->result_set_at ?? now(),
         ])->save();
-
         if ($previousOutcome !== $outcome) {
             AwardPredictionRewards::dispatch($match->id);
         }
     }
-
     private function resolveMatchWeekId(string $kickoffAt): ?int
     {
         $kickoff = Carbon::parse($kickoffAt);
         $start = $kickoff->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
         $end = $start->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
-
         $existing = MatchWeek::whereDate('start_date', $start->toDateString())->first();
         if ($existing) return $existing->id;
-
         $nextNumber = (int) (MatchWeek::max('number') ?? 0) + 1;
         $week = MatchWeek::create([
             'number' => $nextNumber,
@@ -163,13 +154,11 @@ class ClubMatchController extends Controller
         ]);
         return $week->id;
     }
-
     private function mapMatch(ClubMatch $match): array
     {
         $clubName = $match->clubTeam?->short_name ?: $match->clubTeam?->name;
         $homeName = $match->is_home ? $clubName : $match->opponent_name;
         $awayName = $match->is_home ? $match->opponent_name : $clubName;
-
         return [
             'id' => $match->id,
             'match_week_id' => $match->match_week_id,
@@ -190,5 +179,19 @@ class ClubMatchController extends Controller
             'result_outcome' => $match->result_outcome,
             'is_cancelled' => $match->is_cancelled,
         ];
+    }
+    /**
+     * Clubs accessibles : club de l'admin + enfants si club parent.
+     */
+    private function allowedClubIds($user): ?array
+    {
+        if (!$user || $user->is_super_admin || !$user->club_team_id) return null;
+        $club = ClubTeam::find($user->club_team_id);
+        if (!$club) return null;
+        $rootId = $club->parent_id ?: $club->id;
+        return ClubTeam::where('id', $rootId)
+            ->orWhere('parent_id', $rootId)
+            ->pluck('id')
+            ->all();
     }
 }

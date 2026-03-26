@@ -50,7 +50,7 @@ class ClubController extends Controller
             $club->primary_color = $data['primary_color'];
         }
         $club->theme_slug = $data['theme_slug'] ?? 'default';
-        // Les nouveaux clubs doivent être inactifs par défaut pour éviter une mise en ligne immédiate
+        // Les nouveaux clubs doivent Ãªtre inactifs par dÃ©faut pour Ã©viter une mise en ligne immÃ©diate
         $club->is_active = false;
         $club->is_main_club = true;
         $club->save();
@@ -71,7 +71,7 @@ class ClubController extends Controller
         ClubTeam::where('parent_id', $clubTeam->id)->delete();
         $clubTeam->delete();
 
-        return response()->json(['message' => 'Club supprimé.']);
+        return response()->json(['message' => 'Club supprimÃ©.']);
     }
 
     public function update(Request $request, ClubTeam $clubTeam)
@@ -118,7 +118,7 @@ class ClubController extends Controller
             ->where(function ($q) use ($clubIds, $clubTeam) {
                 $q->whereIn('club_team_id', $clubIds);
                 if ($clubTeam->is_main_club) {
-                    // Montrer aussi les comptes non assignés pour éviter les listes vides
+                    // Montrer aussi les comptes non assignÃ©s pour Ã©viter les listes vides
                     $q->orWhereNull('club_team_id');
                 }
             })
@@ -144,6 +144,7 @@ class ClubController extends Controller
                 return [
                     'id' => $c->id,
                     'name' => $c->name,
+                    'description' => $c->description,
                     'rarities_id' => $c->rarities_id,
                     'rarity_slug' => $c->rarity?->slug,
                     'rarity_label' => $c->rarity?->name,
@@ -168,13 +169,14 @@ class ClubController extends Controller
             ->orderBy('name')
             ->get();
 
-        $matches = $clubTeam->matches()
+        $matches = \App\Models\ClubMatch::whereIn('club_team_id', $clubIds)
             ->select('id', 'club_team_id', 'opponent_name', 'location', 'kickoff_at', 'is_home', 'home_score', 'away_score', 'is_cancelled')
             ->orderByDesc('kickoff_at')
             ->limit(100)
             ->get()
             ->map(function ($m) use ($clubTeam) {
-                $clubName = $clubTeam->short_name ?? $clubTeam->name;
+                $team = $m->clubTeam;
+                $clubName = $team?->short_name ?? $team?->name ?? $clubTeam->short_name ?? $clubTeam->name;
                 $home = $m->is_home ? $clubName : $m->opponent_name;
                 $away = $m->is_home ? $m->opponent_name : $clubName;
                 return [
@@ -226,7 +228,7 @@ class ClubController extends Controller
             ->orWhere('parent_id', $clubId)
             ->pluck('id');
 
-        // ── Trades ────────────────────────────────────────────────────────────
+        // â”€â”€ Trades â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         $tradeSummary = Trade::whereIn('club_team_id', $clubIds)
             ->selectRaw("
                 COUNT(*) as total,
@@ -236,14 +238,14 @@ class ClubController extends Controller
             ")
             ->first();
 
-        // ── Pronostics ────────────────────────────────────────────────────────
+        // â”€â”€ Pronostics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         $predStats = \DB::table('match_predictions')
             ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
-            ->where('club_matches.club_team_id', $clubId)
+            ->whereIn('club_matches.club_team_id', $clubIds) // parent + Ã©quipes enfants
             ->selectRaw("
                 COUNT(*) as total,
-                SUM(CASE WHEN match_predictions.rewarded_at IS NULL THEN 1 ELSE 0 END) as ongoing,
-                SUM(CASE WHEN match_predictions.rewarded_at IS NOT NULL THEN 1 ELSE 0 END) as rewarded
+                SUM(CASE WHEN club_matches.result_outcome IS NULL THEN 1 ELSE 0 END) as ongoing,
+                SUM(CASE WHEN club_matches.result_outcome IS NOT NULL THEN 1 ELSE 0 END) as rewarded
             ")
             ->first();
 
@@ -295,7 +297,7 @@ class ClubController extends Controller
             ->orderByDesc('club_matches.kickoff_at')
             ->get();
 
-        // ── Collection completion par utilisateur ─────────────────────────────
+        // â”€â”€ Collection completion par utilisateur â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         $totalCards = Card::whereIn('club_team_id', $clubIds)->count();
 
         $users = User::where('is_super_admin', false)
@@ -319,7 +321,7 @@ class ClubController extends Controller
             ->get()
             ->keyBy('user_id');
 
-        // Raretés possédées par utilisateur
+        // RaretÃ©s possÃ©dÃ©es par utilisateur
         $rarityPerUser = DB::table('user_cards')
             ->join('cards', 'cards.id', '=', 'user_cards.card_id')
             ->join('rarities', 'rarities.id', '=', 'cards.rarities_id')
@@ -334,7 +336,7 @@ class ClubController extends Controller
         $packsOpened = UserProfile::whereIn('user_id', $userIds)
             ->pluck('total_packs_opened', 'user_id');
 
-        // Trades par utilisateur (créés, terminés, annulés, actifs)
+        // Trades par utilisateur (crÃ©Ã©s, terminÃ©s, annulÃ©s, actifs)
         $trades = Trade::whereIn('club_team_id', $clubIds)
             ->where(function ($q) use ($userIds) {
                 $q->whereIn('proposer_id', $userIds)->orWhereIn('receiver_id', $userIds);
@@ -358,21 +360,39 @@ class ClubController extends Controller
             }
         }
 
-        // Pronostics par utilisateur (success = rewarded_at non nul)
+        // Pronostics par utilisateur (exact / bon vainqueur / perdus)
         $predictions = DB::table('match_predictions')
             ->join('club_matches', 'club_matches.id', '=', 'match_predictions.club_match_id')
             ->whereIn('club_matches.club_team_id', $clubIds)
             ->whereIn('match_predictions.user_id', $userIds)
-            ->select('match_predictions.user_id', 'match_predictions.rewarded_at')
+            ->whereNotNull('club_matches.result_outcome')
+            ->select(
+                'match_predictions.user_id',
+                'match_predictions.predicted_outcome',
+                'match_predictions.predicted_home_score',
+                'match_predictions.predicted_away_score',
+                'club_matches.result_outcome',
+                'club_matches.home_score',
+                'club_matches.away_score'
+            )
             ->get();
         $predictionStats = [];
         foreach ($userIds as $uid) {
-            $predictionStats[$uid] = ['total' => 0, 'success' => 0, 'failed' => 0];
+            $predictionStats[$uid] = ['total' => 0, 'exact' => 0, 'winner' => 0, 'failed' => 0];
         }
         foreach ($predictions as $p) {
             $predictionStats[$p->user_id]['total']++;
-            if ($p->rewarded_at) $predictionStats[$p->user_id]['success']++;
-            else                 $predictionStats[$p->user_id]['failed']++;
+            $isExact = $p->home_score !== null && $p->away_score !== null
+                && $p->predicted_home_score === $p->home_score
+                && $p->predicted_away_score === $p->away_score;
+            $isWinner = $p->predicted_outcome === $p->result_outcome;
+            if ($isExact) {
+                $predictionStats[$p->user_id]['exact']++;
+            } elseif ($isWinner) {
+                $predictionStats[$p->user_id]['winner']++;
+            } else {
+                $predictionStats[$p->user_id]['failed']++;
+            }
         }
 
         $collection = $users->map(fn($u) => [
@@ -387,7 +407,7 @@ class ClubController extends Controller
                 : 0,
             'packs_opened' => (int) ($packsOpened[$u->id] ?? 0),
             'trades'       => $userTradeStats[$u->id] ?? ['created' => 0, 'completed' => 0, 'cancelled' => 0, 'active' => 0],
-            'predictions'  => $predictionStats[$u->id] ?? ['total' => 0, 'success' => 0, 'failed' => 0],
+            'predictions'  => $predictionStats[$u->id] ?? ['total' => 0, 'exact' => 0, 'winner' => 0, 'failed' => 0],
             'rarities'     => ($rarityPerUser[$u->id] ?? collect())->mapWithKeys(fn($r) => [$r->rarity => (int) $r->qty]),
         ])->sortByDesc('percent')->values();
 
