@@ -21,6 +21,8 @@ use App\Http\Controllers\Api\Admin\MatchWeekAdminController;
 use App\Http\Controllers\Api\SuperAdmin\DashboardController as SuperDashboardController;
 use App\Http\Controllers\Api\SuperAdmin\ClubController as SuperClubController;
 use App\Http\Controllers\Api\SuperAdmin\SettingsController as SuperSettingsController;
+use App\Http\Controllers\Api\SuperAdmin\UserSessionStatsController;
+use App\Http\Controllers\Api\Session\SessionController;
 use App\Http\Controllers\Api\ClubController;
 
 /*
@@ -84,6 +86,10 @@ Route::middleware(['auth:sanctum', 'throttle:api', 'active'])->group(function ()
     Route::post('/trades',                [TradeController::class, 'store']);
     Route::post('/trades/{trade}/accept', [TradeController::class, 'accept']);
     Route::post('/trades/{trade}/cancel', [TradeController::class, 'cancel']);
+
+    // Session lifecycle (suivi du temps passé sur l'app)
+    Route::post('/sessions/start', [SessionController::class, 'start']);
+    Route::post('/sessions/end',   [SessionController::class, 'end']);
 
     // Predictions
     Route::get('/matches/weeks', [PredictionController::class, 'weeks']);
@@ -185,6 +191,7 @@ Route::middleware(['auth:sanctum', 'superadmin'])->prefix('super-admin')->group(
     Route::get('/clubs/{clubTeam}/dashboard', [SuperClubController::class, 'clubDashboard']);
     Route::get('/settings', [SuperSettingsController::class, 'show']);
     Route::post('/settings', [SuperSettingsController::class, 'update']);
+    Route::get('/user-time-stats', [UserSessionStatsController::class, 'index']);
 });
 
 // Public list of active clubs (for onboarding)

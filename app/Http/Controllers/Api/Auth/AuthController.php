@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -58,6 +59,11 @@ class AuthController extends Controller
         $user->load('profile.favoritePlayerCard.rarity', 'clubTeam');
         $token = $user->createToken('mobile')->plainTextToken;
 
+        UserSession::create([
+            'user_id'    => $user->id,
+            'started_at' => now(),
+        ]);
+
         return response()->json([
             'user' => $this->formatUser($user),
             'token' => $token,
@@ -66,6 +72,12 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
+        UserSession::where('user_id', $request->user()->id)
+            ->whereNull('ended_at')
+            ->latest('started_at')
+            ->first()
+            ?->close();
+
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out successfully.']);
