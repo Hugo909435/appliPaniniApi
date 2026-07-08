@@ -7,6 +7,7 @@ use App\Models\Challenge;
 use App\Models\User;
 use App\Models\UserChallenge;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class ChallengeService
 {
@@ -197,40 +198,55 @@ class ChallengeService
     public function claimReward(User $user, Challenge $challenge): bool
     {
         $user->loadMissing('profile');
-        $userChallenge = $this->getOrCreateUserChallenge($user, $challenge);
 
-        if ($challenge->type === Challenge::TYPE_DAILY) {
-            $this->syncDailyPeriod($userChallenge);
-        }
+        // Assure l'existence de la ligne avant de la verrouiller.
+        $this->getOrCreateUserChallenge($user, $challenge);
 
-        if ($challenge->metric === Challenge::METRIC_LOGIN_STREAK) {
-            $userChallenge->progress = $user->profile?->login_streak ?? 0;
-        }
+        // Verrou pessimiste : sérialise les réclamations concurrentes pour empêcher
+        // qu'une même récompense (coins / carte / médaille) soit accordée deux fois.
+        return DB::transaction(function () use ($user, $challenge) {
+            $userChallenge = UserChallenge::where('user_id', $user->id)
+                ->where('challenge_id', $challenge->id)
+                ->lockForUpdate()
+                ->first();
 
-        if (!$this->isChallengeAvailable($challenge) && !$userChallenge->completed_at) {
-            return false;
-        }
+            if (!$userChallenge) {
+                return false;
+            }
 
-        $hasCompleted = (bool) $userChallenge->completed_at;
+            if ($challenge->type === Challenge::TYPE_DAILY) {
+                $this->syncDailyPeriod($userChallenge);
+            }
 
-        if (!$hasCompleted && $userChallenge->progress < $challenge->target) {
+            if ($challenge->metric === Challenge::METRIC_LOGIN_STREAK) {
+                $userChallenge->progress = $user->profile?->login_streak ?? 0;
+            }
+
+            if (!$this->isChallengeAvailable($challenge) && !$userChallenge->completed_at) {
+                return false;
+            }
+
+            $hasCompleted = (bool) $userChallenge->completed_at;
+
+            if (!$hasCompleted && $userChallenge->progress < $challenge->target) {
+                $userChallenge->save();
+                return false;
+            }
+
+            if (!$hasCompleted) {
+                $userChallenge->completed_at = now();
+            }
+
+            // Déjà réclamé : la ligne est verrouillée, la seconde requête voit claimed_at.
+            if ($userChallenge->claimed_at) {
+                return false;
+            }
+
+            $this->grantRewards($user, $challenge);
+            $userChallenge->claimed_at = now();
             $userChallenge->save();
-            return false;
-        }
 
-        if (!$hasCompleted) {
-            $userChallenge->completed_at = now();
-            $hasCompleted = true;
-        }
-
-        if ($userChallenge->claimed_at) {
-            return false;
-        }
-
-        $this->grantRewards($user, $challenge);
-        $userChallenge->claimed_at = now();
-        $userChallenge->save();
-
-        return true;
+            return true;
+        });
     }
 }

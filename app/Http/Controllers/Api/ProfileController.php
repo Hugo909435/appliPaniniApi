@@ -50,16 +50,23 @@ class ProfileController extends Controller
                 'obtained_at' => $uc->created_at->diffForHumans(),
             ]);
 
+        $isOwnProfile = $user->id === $request->user()->id;
+
+        // Données personnelles (email, soldes) réservées au propriétaire du profil.
+        $profileUser = [
+            'id' => $user->id,
+            'name' => $user->name,
+            'level' => $user->level ?? 1,
+            'created_at' => $user->created_at->format('d/m/Y'),
+        ];
+        if ($isOwnProfile) {
+            $profileUser['email'] = $user->email;
+            $profileUser['coins'] = $user->coins;
+            $profileUser['money'] = $user->money;
+        }
+
         return response()->json([
-            'profile_user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'coins' => $user->coins,
-                'money' => $user->money,
-                'level' => $user->level ?? 1,
-                'created_at' => $user->created_at->format('d/m/Y'),
-            ],
+            'profile_user' => $profileUser,
             'profile' => [
                 'bio' => $profile->bio,
                 'profile_theme' => $profile->profile_theme,

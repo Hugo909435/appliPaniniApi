@@ -97,6 +97,14 @@ class TradeService
                 'completed_at' => now(),
             ]);
 
+            // Comptabilise l'échange pour les deux parties : stats de profil,
+            // XP (+25) et progression des challenges "échanges réalisés".
+            $proposer = User::find($trade->proposer_id);
+            if ($proposer) {
+                $this->recordTradeCompletion($proposer);
+            }
+            $this->recordTradeCompletion($acceptor);
+
             $this->checkAbuseFlags($trade->proposer_id, $acceptor->id);
 
             return $trade->fresh(['offeredCard.rarity', 'requestedCard.rarity', 'proposer', 'receiver']);
@@ -272,6 +280,16 @@ class TradeService
         if ($count >= self::MAX_ACTIVE_TRADES) {
             throw new \Exception('Vous avez déjà ' . self::MAX_ACTIVE_TRADES . ' échanges en attente.');
         }
+    }
+
+    private function recordTradeCompletion(User $user): void
+    {
+        $user->loadMissing('profile');
+        if ($user->profile) {
+            $user->profile->incrementTradesCompleted();
+        }
+        app(\App\Services\ChallengeService::class)
+            ->recordEvent($user, \App\Models\Challenge::METRIC_TRADES_COMPLETED);
     }
 
     private function checkAbuseFlags(int $proposerId, int $acceptorId): void

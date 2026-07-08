@@ -56,6 +56,14 @@ class AuthController extends Controller
         }
 
         $user = $request->user();
+
+        // Met à jour la série de connexions (login_streak) + récompenses associées.
+        $profile = $user->profile()->firstOrCreate(['user_id' => $user->id], ['experience' => 0]);
+        $profile->setRelation('user', $user);
+        $profile->updateLoginStreak();
+
+        // Reflète d'éventuelles récompenses de série (coins / free packs) dans la réponse.
+        $user->refresh();
         $user->load('profile.favoritePlayerCard.rarity', 'clubTeam');
         $token = $user->createToken('mobile')->plainTextToken;
 

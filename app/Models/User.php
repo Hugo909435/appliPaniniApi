@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -129,19 +130,42 @@ class User extends Authenticatable
             return false;
         }
 
-        $this->increment('free_packs');
-        $this->update(['last_free_pack_claimed_at' => now()]);
+        // UPDATE conditionnel atomique : garantit qu'une seule requête concurrente
+        // peut réclamer le pack de la semaine (empêche la double réclamation).
+        $startOfWeek = now()->startOfWeek(\Carbon\Carbon::MONDAY);
 
+        $affected = static::whereKey($this->getKey())
+            ->where('free_packs', '<', self::MAX_FREE_PACKS)
+            ->where(function ($q) use ($startOfWeek) {
+                $q->whereNull('last_free_pack_claimed_at')
+                  ->orWhere('last_free_pack_claimed_at', '<', $startOfWeek);
+            })
+            ->update([
+                'free_packs'                => DB::raw('free_packs + 1'),
+                'last_free_pack_claimed_at' => now(),
+            ]);
+
+        if ($affected === 0) {
+            return false;
+        }
+
+        $this->refresh();
         return true;
     }
 
     public function useFreePack(): bool
     {
-        if ($this->free_packs <= 0) {
+        // Décrément conditionnel atomique : évite la course où deux requêtes
+        // consomment le même pack gratuit.
+        $affected = static::whereKey($this->getKey())
+            ->where('free_packs', '>', 0)
+            ->decrement('free_packs');
+
+        if ($affected === 0) {
             return false;
         }
 
-        $this->decrement('free_packs');
+        $this->free_packs = max(0, (int) $this->free_packs - 1);
         return true;
     }
 
@@ -159,11 +183,22 @@ class User extends Authenticatable
 
     public function removeCoins(int $amount): bool
     {
-        if ($this->coins < $amount) {
+        if ($amount <= 0) {
+            return true;
+        }
+
+        // Débit conditionnel atomique : la ligne n'est décrémentée que si le solde
+        // est suffisant, dans une seule requête SQL. Empêche le double achat en
+        // conditions concurrentes (solde négatif / pack gratuit).
+        $affected = static::whereKey($this->getKey())
+            ->where('coins', '>=', $amount)
+            ->decrement('coins', $amount);
+
+        if ($affected === 0) {
             return false;
         }
 
-        $this->decrement('coins', $amount);
+        $this->coins = (int) $this->coins - $amount;
         return true;
     }
 

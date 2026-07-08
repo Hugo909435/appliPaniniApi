@@ -546,6 +546,30 @@ class PredictionController extends Controller
             $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
         }
 
+        // Le classement est identique pour tous les joueurs d'un même club/scope/semaine :
+        // on met en cache le résultat calculé pendant 120 s pour absorber la charge.
+        $clubKey   = $clubIds ? implode('-', $clubIds) : 'all';
+        $cacheKey  = "leaderboard:{$clubKey}:{$scope}:" . ($weekStart?->toDateString() ?? 'global');
+
+        $leaderboard = \Illuminate\Support\Facades\Cache::remember(
+            $cacheKey,
+            120,
+            fn () => $this->computeLeaderboard($clubIds, $weekStart, $weekEnd)
+        );
+
+        return response()->json([
+            'scope'      => $scope,
+            'week_start' => $weekStart?->toDateString(),
+            'week_end'   => $weekEnd?->toDateString(),
+            'leaderboard'=> $leaderboard,
+        ]);
+    }
+
+    /**
+     * Calcul lourd du classement (points, séries, bonus). Extrait pour la mise en cache.
+     */
+    private function computeLeaderboard(?array $clubIds, ?Carbon $weekStart, ?Carbon $weekEnd): array
+    {
         $allMatchesQuery = ClubMatch::with('matchWeek')
             ->whereNotNull('result_outcome')
             ->where('is_cancelled', false)
@@ -556,7 +580,7 @@ class PredictionController extends Controller
         $matchById   = $allMatches->keyBy('id');
 
         if (empty($allMatchIds)) {
-            return response()->json(['scope' => $scope, 'week_start' => $weekStart?->toDateString(), 'week_end' => $weekEnd?->toDateString(), 'leaderboard' => []]);
+            return [];
         }
 
         $predictions = MatchPrediction::whereIn('club_match_id', $allMatchIds)->get();
@@ -629,7 +653,7 @@ class PredictionController extends Controller
             if ($winnerOk) $correctByUser[$pred->user_id] = ($correctByUser[$pred->user_id] ?? 0) + 1;
         }
 
-        if ($scope !== 'global' && $weekStart) {
+        if ($weekStart) {
             $wk = $weekStart->toDateString();
             foreach ($bonusByUserWeek as $uid => $weeks) {
                 $b = $weeks[$wk] ?? 0;
@@ -661,7 +685,7 @@ class PredictionController extends Controller
         })->sort(fn($a, $b) => [$b['points'], $b['correct'], $b['total']] <=> [$a['points'], $a['correct'], $a['total']])->values()
           ->map(function ($e) use (&$rank) { $e['rank'] = $rank++; return $e; });
 
-        return response()->json(['scope' => $scope, 'week_start' => $weekStart?->toDateString(), 'week_end' => $weekEnd?->toDateString(), 'leaderboard' => $leaderboard]);
+        return $leaderboard->all();
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -722,39 +746,45 @@ class PredictionController extends Controller
 
     private function calculateStreak(int $userId, Carbon $currentWeekStart): int
     {
+        // Une seule requête : on charge tout l'historique du joueur puis on regroupe
+        // par semaine en mémoire (au lieu de jusqu'à 52 requêtes SQL).
+        $predictions = MatchPrediction::where('user_id', $userId)
+            ->with('match.matchWeek')
+            ->get();
+
+        $byWeek = [];
+        foreach ($predictions as $p) {
+            $m = $p->match;
+            if (!$m || $m->is_cancelled) {
+                continue;
+            }
+            $date = $m->matchWeek?->start_date ?? $m->kickoff_at;
+            if (!$date) {
+                continue;
+            }
+            $wk = $date->copy()->startOfWeek(Carbon::MONDAY)->toDateString();
+            $byWeek[$wk][] = $p;
+        }
+
         $streak         = 0;
-        $checkWeekStart = $currentWeekStart->copy()->subWeek()->startOfDay();
+        $checkWeekStart = $currentWeekStart->copy()->subWeek()->startOfWeek(Carbon::MONDAY)->startOfDay();
 
         for ($i = 0; $i < 52; $i++) {
-            $checkWeekEnd = $checkWeekStart->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+            $preds = $byWeek[$checkWeekStart->toDateString()] ?? [];
+            if (count($preds) < 2) break;
 
-            $predictions = MatchPrediction::where('user_id', $userId)
-                ->with('match')
-                ->whereHas('match', function ($q) use ($checkWeekStart, $checkWeekEnd) {
-                    $q->where('is_cancelled', false)
-                      ->where(function ($q2) use ($checkWeekStart, $checkWeekEnd) {
-                          $q2->whereHas('matchWeek', fn($q3) => $q3->whereBetween('start_date', [
-                                  $checkWeekStart->toDateString(),
-                                  $checkWeekStart->copy()->endOfDay()->toDateTimeString(),
-                              ]))
-                             ->orWhereBetween('kickoff_at', [$checkWeekStart, $checkWeekEnd]);
-                      });
-                })
-                ->get();
+            $settled = array_filter($preds, fn($p) => $p->match?->result_outcome !== null);
+            if (count($settled) < 2) break;
 
-            if ($predictions->count() < 2) break;
-
-            $settled = $predictions->filter(fn($p) => $p->match?->result_outcome !== null);
-            if ($settled->count() < 2) break;
-
-            $settledTotal   = $settled->count();
-            $settledCorrect = $settled->filter(function ($p) {
+            $settledTotal   = count($settled);
+            $settledCorrect = 0;
+            foreach ($settled as $p) {
                 $exact  = $p->predicted_home_score === $p->match->home_score && $p->predicted_away_score === $p->match->away_score;
                 $winner = $p->predicted_outcome === $p->match->result_outcome;
-                return $exact || $winner;
-            })->count();
+                if ($exact || $winner) $settledCorrect++;
+            }
 
-            if ($settledTotal === 0 || ($settledCorrect / $settledTotal) < 0.5) break;
+            if (($settledCorrect / $settledTotal) < 0.5) break;
 
             $streak++;
             $checkWeekStart = $checkWeekStart->copy()->subWeek();
